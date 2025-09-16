@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rhythm Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1db954 0%, #191414 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        
+        .container {
+            text-align: center;
+            max-width: 400px;
+            padding: 40px;
+        }
+        
+        h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: #1db954;
+        }
+        
+        p {
+            font-size: 1.2em;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+        
+        .start-btn {
+            background: #1db954;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 25px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .start-btn:hover {
+            background: #1ed760;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(29, 185, 84, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Rhythm Game</h1>
+        <p>Experience new music through a 3-track listening session</p>
+        <a href="auth.html" class="start-btn">Get Started</a>
+    </div>
+    
+    <script>
+        // Auto-redirect with country parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const country = urlParams.get('country');
+        
+        if (country) {
+            document.querySelector('.start-btn').href = `auth.html?country=${encodeURIComponent(country)}`;
+        }
+    </script>
+</body>
+</html>

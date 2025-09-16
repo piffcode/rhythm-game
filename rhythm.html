@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rhythm Game - Session</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+            color: white;
+        }
+        
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        /* Top bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+        
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .timer {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1db954;
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .country-flag {
+            font-size: 1.5em;
+        }
+        
+        .username {
+            color: #b3b3b3;
+            font-size: 0.9em;
+        }
+        
+        /* Main game area */
+        .game-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+        }
+        
+        .rhythm-lane {
+            width: 100%;
+            max-width: 400px;
+            height: 500px;
+            border: 2px solid rgba(29, 185, 84, 0.3);
+            border-radius: 20px;
+            position: relative;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.2);
+            margin-bottom: 30px;
+        }
+        
+        #rhythm-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        /* Controls */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            width: 100%;
+            max-width: 500px;
+        }
+        
+        .main-button {
+            background: linear-gradient(45deg, #1db954, #1ed760);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 150px;
+            box-shadow: 0 8px 20px rgba(29, 185, 84, 0.3);
+        }
+        
+        .main-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 25px rgba(29, 185, 84, 0.4);
+        }
+        
+        .main-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .secondary-button {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 10px 25px;
+            font-size: 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .secondary-button:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Progress area */
+        .progress-area {
+            width: 100%;
+            max-width: 500px;
+            margin-bottom: 20px;
+        }
+        
+        .track-info {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        
+        .track-title {
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .track-artist {
+            color: #b3b3b3;
+            font-size: 0.9em;
+        }
+        
+        .progress-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .progress-bar {
+            background: rgba(255, 255, 255, 0.1);
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #1db954, #1ed760);
+            width: 0%;
+            transition: width 0.1s ease;
+            border-radius: 3px;
+        }
+        
+        .progress-label {
+            font-size: 0.8em;
+            color: #b3b3b3;
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        /* Completion code */
+        .completion-area {
+            background: rgba(29, 185, 84, 0.1);
+            border: 2px solid #1db954;
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .completion-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #1db954;
+        }
+        
+        .completion-code {
+            font-size: 2em;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 3px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            user-select: all;
+            cursor: pointer;
+        }
+        
+        /* Status messages */
+        .status-area {
+            text-align: center;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .status-message {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px 25px;
+            border-radius: 10px;
+            max-width: 400px;
+        }
+        
+        .status-message.error {
+            background: rgba(231, 76, 60, 0.2);
+            border-left: 4px solid #e74c3c;
+        }
+        
+        .status-message.success {
+            background: rgba(29, 185, 84, 0.2);
+            border-left: 4px solid #1db954;
+        }
+        
+        .status-message.warning {
+            background: rgba(255, 193, 7, 0.2);
+            border-left: 4px solid #ffc107;
+            color: #ffc107;
+        }
+        
+        /* Help modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+        
+        .modal {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal h3 {
+            color: #1db954;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        
+        .modal p {
+            margin-bottom: 15px;
+            line-height: 1.6;
+            color: #b3b3b3;
+        }
+        
+        .modal ul {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .modal li {
+            margin-bottom: 8px;
+            color: #b3b3b3;
+        }
+        
+        .close-modal {
+            float: right;
+            font-size: 24px;
+            cursor: pointer;
+            color: #b3b3b3;
+            line-height: 1;
+        }
+        
+        .close-modal:hover {
+            color: white;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .top-bar {
+                flex-direction: column;
+                gap: 10px;
+                padding: 15px;
+            }
+            
+            .rhythm-lane {
+                max-width: 300px;
+                height: 400px;
+            }
+            
+            .game-area {
+                padding: 15px;
+            }
+            
+            .completion-code {
+                font-size: 1.5em;
+                letter-spacing: 2px;
+            }
+        }
+        
+        /* Animations */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .pulsing {
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="top-bar">
+            <div class="session-info">
+                <div class="timer" id="session-timer">00:00</div>
+                <button class="secondary-button" onclick="showHelp()">Help</button>
+            </div>
+            <div class="user-info" id="user-info">
+                <!-- User info populated by JS -->
+            </div>
+        </div>
+        
+        <div class="game-area">
+            <div class="rhythm-lane">
+                <canvas id="rhythm-canvas"></canvas>
+            </div>
+            
+            <div class="progress-area">
+                <div class="track-info" id="track-info">
+                    <div class="track-title" id="track-title">Ready to start session</div>
+                    <div class="track-artist" id="track-artist">3 tracks • ~12 minutes</div>
+                </div>
+                
+                <div class="progress-bars" id="progress-bars">
+                    <div class="track-progress" style="display: none;">
+                        <div class="progress-label">
+                            <span>Track 1</span>
+                            <span id="track1-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="track1-progress"></div>
+                        </div>
+                    </div>
+                    <div class="track-progress" style="display: none;">
+                        <div class="progress-label">
+                            <span>Track 2</span>
+                            <span id="track2-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="track2-progress"></div>
+                        </div>
+                    </div>
+                    <div class="track-progress" style="display: none;">
+                        <div class="progress-label">
+                            <span>Track 3</span>
+                            <span id="track3-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="track3-progress"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button class="main-button" id="main-button">Start Session</button>
+                <button class="secondary-button" id="save-button" style="display: none;">
+                    💖 Save This Track
+                </button>
+                <button class="secondary-button" id="finish-button" style="display: none;">
+                    Finish Now
+                </button>
+            </div>
+            
+            <div class="status-area">
+                <div class="status-message" id="status-message" style="display: none;">
+                    Initializing...
+                </div>
+            </div>
+            
+            <div class="completion-area fade-in" id="completion-area">
+                <div class="completion-title">🎉 Session Complete!</div>
+                <div>Your completion code:</div>
+                <div class="completion-code" id="completion-code" onclick="copyCode()" title="Click to copy">
+                    PM-XXXXXX
+                </div>
+                <div style="font-size: 0.9em; color: #b3b3b3;">
+                    Click code to copy • Playlist saved to your account
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Help Modal -->
+    <div class="modal-overlay" id="help-modal">
+        <div class="modal">
+            <span class="close-modal" onclick="hideHelp()">&times;</span>
+            <h3>How to Play</h3>
+            <p><strong>Requirements:</strong></p>
+            <ul>
+                <li>Spotify Premium account (required for full track playback)</li>
+                <li>Keep this browser tab active during the session</li>
+                <li>Have Spotify app installed (recommended)</li>
+            </ul>
+            
+            <p><strong>How it works:</strong></p>
+            <ul>
+                <li>We'll create a playlist on your Spotify account</li>
+                <li>Play 3 tracks in sequence (~12 minutes total)</li>
+                <li>You need to listen to most of each track to qualify</li>
+                <li>Get your completion code when finished</li>
+            </ul>
+            
+            <p><strong>Troubleshooting:</strong></p>
+            <ul>
+                <li>If nothing plays, try clicking "Start" again</li>
+                <li>Make sure Spotify is logged in somewhere</li>
+                <li>Check your internet connection</li>
+                <li>Free accounts can only play 30-second previews</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Spotify Web Playback SDK -->
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    
+    <!-- Game Logic -->
+    <script src="rhythm.js"></script>
+    
+    <script>
+        function showHelp() {
+            document.getElementById('help-modal').style.display = 'flex';
+        }
+        
+        function hideHelp() {
+            document.getElementById('help-modal').style.display = 'none';
+        }
+        
+        function copyCode() {
+            const codeElement = document.getElementById('completion-code');
+            const code = codeElement.textContent;
+            
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(code).then(() => {
+                    showMessage('Code copied to clipboard!', 'success');
+                });
+            } else {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = code;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showMessage('Code copied!', 'success');
+            }
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('help-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                hideHelp();
+            }
+        });
+    </script>
+</body>
+</html>
