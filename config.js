@@ -6,7 +6,7 @@ const CONFIG = (() => {
   const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1');
   
   // Production host - your Vercel domain
-  const PROD_HOST = 'https://rhythm-game-4v406xt16-rhythm-games-projects.vercel.app';
+  const PROD_HOST = 'https://rhythm-game-a7987zwal-rhythm-games-projects.vercel.app';
   
   const config = {
     IS_LOCAL: isLocal,
