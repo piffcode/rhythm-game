@@ -1,4 +1,63 @@
 // Spotify Rhythm Game - Main Logic (Complete Version with Dynamic Playlist Generation)
+class TokenManager {
+    constructor(config, bootstrap) {
+        this.config = config;
+        this.bootstrap = bootstrap;
+        this.cachedToken = null;
+        this.expiresAt = 0;
+        this.refreshPromise = null;
+    }
+
+    async fetchNewToken() {
+        const endpoint = `${this.config.TOKEN_ENDPOINTS.ACCESS}?bootstrap=${encodeURIComponent(this.bootstrap)}`;
+        const response = await fetch(endpoint, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json'
+            },
+            credentials: 'include'
+        });
+
+        if (response.status === 401) {
+            throw new Error('Session expired.');
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to acquire access token.');
+        }
+
+        const data = await response.json();
+        if (!data.access_token || typeof data.expires_in !== 'number') {
+            throw new Error('Token service returned an unexpected response.');
+        }
+
+        this.cachedToken = data.access_token;
+        const expiresInMs = Math.max(data.expires_in, 0) * 1000;
+        this.expiresAt = Date.now() + expiresInMs;
+        return this.cachedToken;
+    }
+
+    async getAccessToken() {
+        const bufferMs = (this.config.GAME_SETTINGS.TOKEN_REFRESH_BUFFER || 0) * 1000;
+        if (this.cachedToken && Date.now() < (this.expiresAt - bufferMs)) {
+            return this.cachedToken;
+        }
+
+        if (!this.refreshPromise) {
+            this.refreshPromise = this.fetchNewToken()
+                .finally(() => { this.refreshPromise = null; });
+        }
+
+        return this.refreshPromise;
+    }
+
+    invalidate() {
+        this.cachedToken = null;
+        this.expiresAt = 0;
+    }
+}
+
 class SpotifyRhythmGame {
     constructor() {
         this.player = null;
@@ -11,21 +70,23 @@ class SpotifyRhythmGame {
         this.devicePollInterval = null;
         this.retryCount = 0;
         this.maxRetries = 1;
-        this.refreshPromise = null; // Fix for race condition
         this.animationId = null; // For visualizer
         this.canvas = null;
         this.ctx = null;
-        
+        this.tokenManager = null;
+        this.bootstrapNonce = null;
+
         this.init();
     }
-    
+
     async init() {
         try {
             // Validate bootstrap nonce first
-            if (!this.validateBootstrap()) {
+            const bootstrapValid = await this.validateBootstrap();
+            if (!bootstrapValid) {
                 return;
             }
-            
+
             // Initialize visualizer
             this.initializeVisualizer();
             
@@ -50,88 +111,59 @@ class SpotifyRhythmGame {
         }
     }
     
-    validateBootstrap() {
+    async validateBootstrap() {
         const urlParams = new URLSearchParams(window.location.search);
         const bootstrapParam = urlParams.get('bootstrap');
-        const storedNonce = sessionStorage.getItem('bootstrap_nonce');
-        
-        if (!bootstrapParam || !storedNonce || bootstrapParam !== storedNonce) {
-            console.warn('Bootstrap validation failed');
-            const country = urlParams.get('country');
-            let authUrl = CONFIG.AUTH_REDIRECT_URI.replace('/auth.html', '/auth.html');
-            if (country) {
-                authUrl += `?country=${encodeURIComponent(country)}`;
-            }
-            window.location.href = authUrl;
+        if (!bootstrapParam) {
+            this.redirectToAuth('Missing session bootstrap parameter.');
             return false;
         }
-        
-        return true;
-    }
-    
-    // Fixed token management with race condition protection
-    async getAccessToken() {
-        const token = sessionStorage.getItem('access_token');
-        const expiresAt = parseInt(sessionStorage.getItem('expires_at') || '0');
-        const refreshToken = sessionStorage.getItem('refresh_token');
-        
-        // Check if token is expired (with buffer)
-        if (Date.now() >= (expiresAt - (CONFIG.GAME_SETTINGS.TOKEN_REFRESH_BUFFER * 1000))) {
-            if (refreshToken) {
-                // Prevent multiple simultaneous refresh attempts
-                if (!this.refreshPromise) {
-                    this.refreshPromise = this.refreshAccessToken()
-                        .finally(() => { this.refreshPromise = null; });
-                }
-                await this.refreshPromise;
-                return sessionStorage.getItem('access_token');
-            } else {
-                this.redirectToAuth('Session expired. Please login again.');
-                return null;
+
+        try {
+            const response = await fetch(CONFIG.TOKEN_ENDPOINTS.VALIDATE_SESSION, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({ bootstrap: bootstrapParam })
+            });
+
+            if (response.status === 401) {
+                throw new Error('Session expired');
             }
-        }
-        
-        return token;
-    }
-    
-    async refreshAccessToken() {
-        const refreshToken = sessionStorage.getItem('refresh_token');
-        if (!refreshToken) {
-            throw new Error('No refresh token available');
-        }
-        
-        const response = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-                client_id: CONFIG.CLIENT_ID
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to refresh token');
-        }
-        
-        const tokens = await response.json();
-        const expiresAt = Date.now() + (tokens.expires_in * 1000);
-        
-        sessionStorage.setItem('access_token', tokens.access_token);
-        sessionStorage.setItem('expires_at', expiresAt.toString());
-        
-        if (tokens.refresh_token) {
-            sessionStorage.setItem('refresh_token', tokens.refresh_token);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Session validation failed');
+            }
+
+            const data = await response.json();
+            if (!data.valid) {
+                throw new Error('Session is no longer valid');
+            }
+
+            this.bootstrapNonce = bootstrapParam;
+            this.tokenManager = new TokenManager(CONFIG, bootstrapParam);
+
+            return true;
+        } catch (error) {
+            console.error('Bootstrap validation failed:', error);
+            this.redirectToAuth('Authentication session expired. Please login again.');
+            return false;
         }
     }
-    
+
     redirectToAuth(message = null) {
         if (message) {
             this.showMessage(message, 'error');
         }
-        
+
+        fetch(CONFIG.TOKEN_ENDPOINTS.LOGOUT, {
+            method: 'POST',
+            credentials: 'include'
+        }).catch(() => {});
+
         const urlParams = new URLSearchParams(window.location.search);
         const country = urlParams.get('country');
         let authUrl = CONFIG.AUTH_REDIRECT_URI.replace('/auth.html', '/auth.html');
@@ -146,11 +178,17 @@ class SpotifyRhythmGame {
     
     // Enhanced API request handling with better error messages
     async makeSpotifyRequest(endpoint, options = {}) {
-        const token = await this.getAccessToken();
-        if (!token) return null;
-        
+        if (!this.tokenManager) {
+            throw new Error('Token manager is not initialized.');
+        }
+
+        const token = await this.tokenManager.getAccessToken();
+        if (!token) {
+            return null;
+        }
+
         const url = endpoint.startsWith('http') ? endpoint : `https://api.spotify.com/v1${endpoint}`;
-        
+
         try {
             const response = await fetch(url, {
                 ...options,
@@ -163,10 +201,11 @@ class SpotifyRhythmGame {
             
             if (response.status === 401 && this.retryCount < this.maxRetries) {
                 this.retryCount++;
-                await this.refreshAccessToken();
+                this.tokenManager.invalidate();
+                await this.tokenManager.getAccessToken();
                 return this.makeSpotifyRequest(endpoint, options);
             }
-            
+
             // Enhanced Premium check
             if (response.status === 403) {
                 const errorData = await response.json().catch(() => ({}));
@@ -190,12 +229,12 @@ class SpotifyRhythmGame {
             
             if (error.message.includes('Premium')) {
                 this.showMessage('Spotify Premium required for playback control.', 'error', 'Please upgrade your Spotify account to continue.');
-            } else if (error.message.includes('401')) {
+            } else if (error.message.includes('Session expired') || /unauthorized|forbidden/i.test(error.message)) {
                 this.redirectToAuth('Authentication expired.');
             } else {
                 this.showMessage(`API Error: ${error.message}`, 'error');
             }
-            
+
             throw error;
         }
     }
@@ -233,12 +272,17 @@ class SpotifyRhythmGame {
             window.onSpotifyWebPlaybackSDKReady = () => {
                 sdkReady = true;
                 clearTimeout(sdkTimeout);
-                
-                const token = sessionStorage.getItem('access_token');
-                
                 this.player = new Spotify.Player({
                     name: 'Spotify Rhythm Game',
-                    getOAuthToken: cb => cb(token),
+                    getOAuthToken: async (cb) => {
+                        try {
+                            const freshToken = await this.tokenManager.getAccessToken();
+                            cb(freshToken);
+                        } catch (error) {
+                            console.error('Failed to supply token to Spotify SDK:', error);
+                            this.redirectToAuth('Authentication expired. Please login again.');
+                        }
+                    },
                     volume: 0.8
                 });
                 
@@ -948,7 +992,7 @@ class SpotifyRhythmGame {
         const payload = {
             event: event,
             timestamp: Date.now(),
-            session_id: sessionStorage.getItem('bootstrap_nonce'),
+            session_id: this.bootstrapNonce,
             user_agent: navigator.userAgent,
             ...data
         };
