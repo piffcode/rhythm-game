@@ -338,6 +338,12 @@
 
         updateDebugToggle();
 
+        if (!CONFIG.CLIENT_ID) {
+            renderMessage('Spotify client ID is not configured. Please set it before continuing.', 'error');
+            setButtonState({ disabled: true, label: 'Configuration Required' });
+            return;
+        }
+
         if (window.location.search) {
             exchangeCode();
         } else if (DOM.button) {

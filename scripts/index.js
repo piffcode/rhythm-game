@@ -47,6 +47,12 @@
             return;
         }
 
+        if (!config.CLIENT_ID) {
+            console.error('[landing] Missing Spotify client ID.');
+            disableButton(playButton, 'Spotify is not configured. Set the client ID before enabling login.');
+            return;
+        }
+
         let popup = null;
 
         const closePopup = () => {
