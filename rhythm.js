@@ -1,4 +1,4 @@
-// Spotify Rhythm Game - Main Logic
+// Spotify Rhythm Game - Main Logic (Complete Version with Dynamic Playlist Generation)
 class SpotifyRhythmGame {
     constructor() {
         this.player = null;
@@ -11,6 +11,10 @@ class SpotifyRhythmGame {
         this.devicePollInterval = null;
         this.retryCount = 0;
         this.maxRetries = 1;
+        this.refreshPromise = null; // Fix for race condition
+        this.animationId = null; // For visualizer
+        this.canvas = null;
+        this.ctx = null;
         
         this.init();
     }
@@ -22,14 +26,20 @@ class SpotifyRhythmGame {
                 return;
             }
             
+            // Initialize visualizer
+            this.initializeVisualizer();
+            
             // Load user profile
             await this.loadUserProfile();
             
-            // Initialize Spotify Web Playback SDK
+            // Initialize Spotify Web Playback SDK with timeout
             await this.initializePlayer();
             
             // Setup event listeners
             this.setupEventListeners();
+            
+            // Setup cleanup on page unload
+            this.setupCleanup();
             
             // Start device detection
             this.startDeviceDetection();
@@ -59,22 +69,22 @@ class SpotifyRhythmGame {
         return true;
     }
     
+    // Fixed token management with race condition protection
     async getAccessToken() {
         const token = sessionStorage.getItem('access_token');
         const expiresAt = parseInt(sessionStorage.getItem('expires_at') || '0');
         const refreshToken = sessionStorage.getItem('refresh_token');
         
-        // Check if token is expired (with 5 minute buffer)
+        // Check if token is expired (with buffer)
         if (Date.now() >= (expiresAt - (CONFIG.GAME_SETTINGS.TOKEN_REFRESH_BUFFER * 1000))) {
             if (refreshToken) {
-                try {
-                    await this.refreshAccessToken();
-                    return sessionStorage.getItem('access_token');
-                } catch (error) {
-                    console.error('Token refresh failed:', error);
-                    this.redirectToAuth('Session expired. Please login again.');
-                    return null;
+                // Prevent multiple simultaneous refresh attempts
+                if (!this.refreshPromise) {
+                    this.refreshPromise = this.refreshAccessToken()
+                        .finally(() => { this.refreshPromise = null; });
                 }
+                await this.refreshPromise;
+                return sessionStorage.getItem('access_token');
             } else {
                 this.redirectToAuth('Session expired. Please login again.');
                 return null;
@@ -134,6 +144,7 @@ class SpotifyRhythmGame {
         }, 2000);
     }
     
+    // Enhanced API request handling with better error messages
     async makeSpotifyRequest(endpoint, options = {}) {
         const token = await this.getAccessToken();
         if (!token) return null;
@@ -156,6 +167,15 @@ class SpotifyRhythmGame {
                 return this.makeSpotifyRequest(endpoint, options);
             }
             
+            // Enhanced Premium check
+            if (response.status === 403) {
+                const errorData = await response.json().catch(() => ({}));
+                if (errorData.error?.reason === 'PREMIUM_REQUIRED') {
+                    this.showMessage('Spotify Premium is required for this feature. Please upgrade your account.', 'error');
+                    return null;
+                }
+            }
+            
             this.retryCount = 0;
             
             if (!response.ok) {
@@ -169,7 +189,7 @@ class SpotifyRhythmGame {
             console.error(`Spotify API error for ${endpoint}:`, error);
             
             if (error.message.includes('Premium')) {
-                this.showMessage('Spotify Premium required for playback control.', 'error');
+                this.showMessage('Spotify Premium required for playback control.', 'error', 'Please upgrade your Spotify account to continue.');
             } else if (error.message.includes('401')) {
                 this.redirectToAuth('Authentication expired.');
             } else {
@@ -189,7 +209,7 @@ class SpotifyRhythmGame {
                 
                 // Check if user has Premium
                 if (profile.product !== 'premium') {
-                    this.showMessage('Spotify Premium is required for playback control. Please upgrade your account.', 'warn');
+                    this.showMessage('Spotify Premium is required for playback control. Please upgrade your account.', 'warn', 'Visit spotify.com/premium to upgrade.');
                 }
             }
         } catch (error) {
@@ -198,9 +218,22 @@ class SpotifyRhythmGame {
         }
     }
     
+    // Fixed SDK initialization with timeout and fallback
     async initializePlayer() {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
+            let sdkReady = false;
+            const sdkTimeout = setTimeout(() => {
+                if (!sdkReady) {
+                    console.error('Spotify SDK failed to load');
+                    this.showMessage('Spotify SDK failed to load. Please refresh the page.', 'error');
+                    reject(new Error('SDK timeout'));
+                }
+            }, 10000);
+            
             window.onSpotifyWebPlaybackSDKReady = () => {
+                sdkReady = true;
+                clearTimeout(sdkTimeout);
+                
                 const token = sessionStorage.getItem('access_token');
                 
                 this.player = new Spotify.Player({
@@ -231,6 +264,76 @@ class SpotifyRhythmGame {
         });
     }
     
+    // Initialize basic visualizer
+    initializeVisualizer() {
+        this.canvas = document.getElementById('visualizer');
+        if (this.canvas) {
+            this.ctx = this.canvas.getContext('2d');
+        }
+    }
+    
+    startVisualization() {
+        if (!this.canvas || !this.ctx) return;
+        
+        const draw = () => {
+            if (!this.isSessionActive) return;
+            
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Simple waveform simulation
+            const centerY = this.canvas.height / 2;
+            const amplitude = 30;
+            const frequency = 0.02;
+            const time = Date.now() * 0.01;
+            
+            this.ctx.strokeStyle = '#1db954';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            
+            for (let x = 0; x < this.canvas.width; x++) {
+                const y = centerY + Math.sin((x * frequency) + time) * amplitude;
+                if (x === 0) {
+                    this.ctx.moveTo(x, y);
+                } else {
+                    this.ctx.lineTo(x, y);
+                }
+            }
+            
+            this.ctx.stroke();
+            this.animationId = requestAnimationFrame(draw);
+        };
+        
+        draw();
+    }
+    
+    stopVisualization() {
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        
+        if (this.canvas && this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+    }
+    
+    // Setup cleanup handlers
+    setupCleanup() {
+        window.addEventListener('beforeunload', () => {
+            this.cleanup();
+        });
+    }
+    
+    cleanup() {
+        if (this.devicePollInterval) {
+            clearInterval(this.devicePollInterval);
+        }
+        if (this.player) {
+            this.player.disconnect();
+        }
+        this.stopVisualization();
+    }
+    
     setupEventListeners() {
         // Control buttons
         document.getElementById('startBtn').addEventListener('click', () => this.startSession());
@@ -251,9 +354,12 @@ class SpotifyRhythmGame {
         });
     }
     
-    showMessage(text, type = 'error') {
+    // Enhanced message display with actionable guidance
+    showMessage(text, type = 'error', actionable = null) {
         const messageBlock = document.getElementById('messageBlock');
-        messageBlock.textContent = text;
+        messageBlock.innerHTML = actionable 
+            ? `${text}<br><small>${actionable}</small>`
+            : text;
         messageBlock.className = `message-block ${type}`;
         messageBlock.style.display = 'block';
         
@@ -292,7 +398,7 @@ class SpotifyRhythmGame {
                 if (activeDevice) {
                     clearInterval(this.devicePollInterval);
                     deviceStatus.className = 'device-status found';
-                    deviceStatus.textContent = `✅ Found active device: ${activeDevice.name}`;
+                    deviceStatus.textContent = `Found active device: ${activeDevice.name}`;
                     
                     setTimeout(() => {
                         deviceActivation.style.display = 'none';
@@ -305,7 +411,7 @@ class SpotifyRhythmGame {
                 if (pollCount >= maxPolls) {
                     clearInterval(this.devicePollInterval);
                     deviceStatus.className = 'device-status timeout';
-                    deviceStatus.innerHTML = '⚠️ No active device found.<br>Please open Spotify and play a song, then click "Open Spotify App" to try again.';
+                    deviceStatus.innerHTML = 'No active device found.<br>Please open Spotify and play a song, then click "Open Spotify App" to try again.';
                 }
                 
             } catch (error) {
@@ -371,6 +477,7 @@ class SpotifyRhythmGame {
             await this.startPlayback();
             
             this.isSessionActive = true;
+            this.startVisualization();
             this.updateUI();
             
         } catch (error) {
@@ -379,27 +486,48 @@ class SpotifyRhythmGame {
         }
     }
     
+    // NEW: Dynamic playlist generation with fixed tracks and rotation
     async createGamePlaylist() {
         try {
-            // Get user's top tracks for variety
-            const topTracks = await this.makeSpotifyRequest('/me/top/tracks?limit=50&time_range=medium_term');
+            const country = new URLSearchParams(window.location.search).get('country') || 'US';
             
-            if (!topTracks?.items?.length) {
-                // Fallback to featured playlists
-                const featured = await this.makeSpotifyRequest('/browse/featured-playlists?limit=1');
-                if (featured?.playlists?.items?.[0]) {
-                    const playlist = await this.makeSpotifyRequest(`/playlists/${featured.playlists.items[0].id}/tracks?limit=50`);
-                    topTracks.items = playlist.items.map(item => item.track).filter(track => track && track.preview_url);
-                }
+            // Fixed track IDs - these will always be first two tracks
+            const fixedTrackIds = [
+                '5FMyXeZ0reYloRTiCkPprT',
+                '0YWmeJtd7Fp1tH3978qUIH'
+            ];
+            
+            // Get the fixed tracks
+            const fixedTracksResponse = await this.makeSpotifyRequest(
+                `/tracks?ids=${fixedTrackIds.join(',')}&market=${country}`
+            );
+            
+            if (!fixedTracksResponse?.tracks || fixedTracksResponse.tracks.length !== 2) {
+                throw new Error('Unable to load required tracks');
             }
             
-            if (!topTracks?.items?.length) {
-                throw new Error('Unable to find tracks for playlist');
+            const fixedTracks = fixedTracksResponse.tracks;
+            
+            // Dynamically find similar tracks
+            let similarTracks = await this.findSimilarTracks();
+            
+            // Fallback to genre-based if audio feature search fails
+            if (similarTracks.length === 0) {
+                similarTracks = await this.findSimilarTracksByGenre();
             }
             
-            // Randomize and select tracks
-            const shuffled = topTracks.items.sort(() => Math.random() - 0.5);
-            const selectedTracks = shuffled.slice(0, CONFIG.GAME_SETTINGS.PLAYLIST_SIZE);
+            // Select random track from similar tracks
+            let rotationTrack = null;
+            if (similarTracks.length > 0) {
+                const randomIndex = Math.floor(Math.random() * similarTracks.length);
+                rotationTrack = similarTracks[randomIndex];
+            }
+            
+            // Build final track list
+            const selectedTracks = [...fixedTracks];
+            if (rotationTrack) {
+                selectedTracks.push(rotationTrack);
+            }
             
             this.currentPlaylist = {
                 tracks: selectedTracks,
@@ -410,13 +538,164 @@ class SpotifyRhythmGame {
             this.updatePlaylistDisplay();
             this.sendTelemetry('playlist_created', {
                 track_count: selectedTracks.length,
-                source: 'user_top_tracks'
+                source: 'fixed_plus_dynamic_similar',
+                country: country,
+                similar_tracks_found: similarTracks.length
+            });
+            
+            console.log('Playlist created with dynamic similar tracks:', {
+                fixed_tracks: fixedTracks.map(t => `${t.name} - ${t.artists[0]?.name}`),
+                rotation_track: rotationTrack ? `${rotationTrack.name} - ${rotationTrack.artists[0]?.name}` : 'None',
+                similar_pool_size: similarTracks.length
             });
             
         } catch (error) {
             console.error('Playlist creation error:', error);
             throw error;
         }
+    }
+    
+    // Method to find similar tracks using audio features
+    async findSimilarTracks() {
+        const fixedTrackIds = [
+            '5FMyXeZ0reYloRTiCkPprT',
+            '0YWmeJtd7Fp1tH3978qUIH'
+        ];
+        
+        try {
+            const country = new URLSearchParams(window.location.search).get('country') || 'US';
+            
+            // Get audio features for the fixed tracks
+            const audioFeaturesResponse = await this.makeSpotifyRequest(
+                `/audio-features?ids=${fixedTrackIds.join(',')}`
+            );
+            
+            if (!audioFeaturesResponse?.audio_features) {
+                throw new Error('Unable to get audio features');
+            }
+            
+            const features = audioFeaturesResponse.audio_features;
+            
+            // Calculate average audio features
+            const avgFeatures = {
+                danceability: (features[0].danceability + features[1].danceability) / 2,
+                energy: (features[0].energy + features[1].energy) / 2,
+                valence: (features[0].valence + features[1].valence) / 2,
+                acousticness: (features[0].acousticness + features[1].acousticness) / 2,
+                instrumentalness: (features[0].instrumentalness + features[1].instrumentalness) / 2,
+                tempo: (features[0].tempo + features[1].tempo) / 2
+            };
+            
+            // Get track details for genre seeds
+            const tracksResponse = await this.makeSpotifyRequest(
+                `/tracks?ids=${fixedTrackIds.join(',')}`
+            );
+            
+            // Extract artist IDs for seed_artists
+            const artistIds = [];
+            tracksResponse.tracks.forEach(track => {
+                if (track.artists && track.artists[0]) {
+                    artistIds.push(track.artists[0].id);
+                }
+            });
+            
+            // Get recommendations based on audio features
+            const recommendationParams = new URLSearchParams({
+                seed_artists: artistIds.slice(0, 2).join(','), // Max 2 artist seeds
+                seed_tracks: fixedTrackIds[0], // Use first track as seed
+                limit: '20', // Get more to have variety
+                market: country,
+                // Target audio features (with some tolerance)
+                target_danceability: avgFeatures.danceability.toFixed(2),
+                target_energy: avgFeatures.energy.toFixed(2),
+                target_valence: avgFeatures.valence.toFixed(2),
+                min_danceability: Math.max(0, avgFeatures.danceability - 0.2).toFixed(2),
+                max_danceability: Math.min(1, avgFeatures.danceability + 0.2).toFixed(2),
+                min_energy: Math.max(0, avgFeatures.energy - 0.2).toFixed(2),
+                max_energy: Math.min(1, avgFeatures.energy + 0.2).toFixed(2)
+            });
+            
+            const recommendationsResponse = await this.makeSpotifyRequest(
+                `/recommendations?${recommendationParams}`
+            );
+            
+            if (recommendationsResponse?.tracks) {
+                // Filter out the fixed tracks if they appear in recommendations
+                const similarTracks = recommendationsResponse.tracks.filter(
+                    track => !fixedTrackIds.includes(track.id)
+                );
+                
+                console.log('Similar tracks found via audio features:', similarTracks.map(track => ({
+                    id: track.id,
+                    name: track.name,
+                    artist: track.artists[0]?.name,
+                    uri: track.uri
+                })));
+                
+                return similarTracks.slice(0, 7); // Return up to 7 tracks
+            }
+            
+        } catch (error) {
+            console.error('Error finding similar tracks via audio features:', error);
+            return [];
+        }
+        
+        return [];
+    }
+    
+    // Alternative method using genre-based search
+    async findSimilarTracksByGenre() {
+        try {
+            const country = new URLSearchParams(window.location.search).get('country') || 'US';
+            
+            // Get genre seeds from user's top artists
+            const topArtists = await this.makeSpotifyRequest(`/me/top/artists?limit=5&time_range=medium_term`);
+            let genreSeeds = [];
+            
+            if (topArtists?.items) {
+                // Extract genres from top artists
+                topArtists.items.forEach(artist => {
+                    if (artist.genres) {
+                        genreSeeds.push(...artist.genres);
+                    }
+                });
+            }
+            
+            // Fallback to popular genres if no user data
+            if (genreSeeds.length === 0) {
+                genreSeeds = ['pop', 'rock', 'indie', 'alternative', 'dance'];
+            }
+            
+            // Use first 2-3 genres as seeds
+            const selectedGenres = genreSeeds.slice(0, 3);
+            
+            const recommendationParams = new URLSearchParams({
+                seed_genres: selectedGenres.join(','),
+                limit: '20',
+                market: country
+            });
+            
+            const recommendationsResponse = await this.makeSpotifyRequest(
+                `/recommendations?${recommendationParams}`
+            );
+            
+            if (recommendationsResponse?.tracks) {
+                console.log('Similar tracks found via genre seeds:', recommendationsResponse.tracks.map(track => ({
+                    id: track.id,
+                    name: track.name,
+                    artist: track.artists[0]?.name,
+                    uri: track.uri
+                })));
+                
+                return recommendationsResponse.tracks.slice(0, 7);
+            }
+            
+        } catch (error) {
+            console.error('Error finding similar tracks via genre:', error);
+            return [];
+        }
+        
+        return [];
     }
     
     generateRandomGaps(trackCount) {
@@ -442,30 +721,45 @@ class SpotifyRhythmGame {
         }
     }
     
+    // Fixed device selection logic
     async transferPlayback() {
         try {
-            // Get current devices
             const devices = await this.makeSpotifyRequest('/me/player/devices');
-            const activeDevice = devices?.devices?.find(d => d.is_active);
             
-            if (!activeDevice) {
-                throw new Error('No active device found. Please start playback on Spotify first.');
+            if (!devices?.devices?.length) {
+                throw new Error('No Spotify devices available');
+            }
+            
+            // Prefer Web Playback SDK device if available
+            let targetDevice = devices.devices.find(d => d.id === this.deviceId);
+            
+            // Otherwise use any active device
+            if (!targetDevice) {
+                targetDevice = devices.devices.find(d => d.is_active);
+            }
+            
+            // Otherwise use first available device
+            if (!targetDevice) {
+                targetDevice = devices.devices[0];
             }
             
             // Transfer playback if needed
-            if (this.deviceId && activeDevice.id !== this.deviceId) {
+            if (!targetDevice.is_active) {
                 await this.makeSpotifyRequest('/me/player', {
                     method: 'PUT',
                     body: JSON.stringify({
-                        device_ids: [activeDevice.id],
+                        device_ids: [targetDevice.id],
                         play: false
                     })
                 });
+                
+                // Wait a moment for transfer to complete
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
             
         } catch (error) {
             console.error('Playback transfer error:', error);
-            throw error;
+            throw new Error('Failed to setup playback device. Please ensure Spotify is running and try again.');
         }
     }
     
@@ -489,7 +783,7 @@ class SpotifyRhythmGame {
             
         } catch (error) {
             console.error('Playback start error:', error);
-            throw error;
+            throw new Error('Failed to start playback. Please check your Spotify Premium status.');
         }
     }
     
@@ -626,6 +920,7 @@ class SpotifyRhythmGame {
             this.player.pause();
         }
         
+        this.stopVisualization();
         this.updateUI();
         
         if (!completed) {
@@ -667,9 +962,7 @@ class SpotifyRhythmGame {
     }
 }
 
-// Initialize game when DOM is loaded
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => new SpotifyRhythmGame());
-} else {
+// Initialize the game when the page loads
+document.addEventListener('DOMContentLoaded', () => {
     new SpotifyRhythmGame();
-}
+});

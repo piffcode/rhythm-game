@@ -1,9 +1,9 @@
 // Environment Configuration for Spotify Rhythm Game
-// Updated for Vercel deployment
+// Enhanced version with HTTPS enforcement and better environment detection
 
 const CONFIG = (() => {
   const currentHost = window.location.origin;
-  const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1');
+  const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1') || currentHost.includes('192.168.');
   
   // Production host - your actual Vercel domain
   const PROD_HOST = 'https://rhythm-game-phi.vercel.app';
@@ -43,6 +43,11 @@ const CONFIG = (() => {
   config.AUTH_REDIRECT_URI = `${config.HOST}/auth.html`;
   config.GAME_URL = `${config.HOST}/rhythm.html`;
   config.INDEX_URL = `${config.HOST}/index.html`;
+  
+  // HTTPS enforcement for production
+  if (!config.IS_LOCAL && location.protocol !== 'https:') {
+    location.replace(`https:${location.href.substring(location.protocol.length)}`);
+  }
   
   return config;
 })();

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spotify Rhythm Game - Authentication</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://accounts.spotify.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
     <style>
         * {
             margin: 0;
@@ -74,6 +75,7 @@
             padding: 12px;
             border-radius: 6px;
             font-size: 0.9em;
+            line-height: 1.4;
         }
         
         .message.error {
@@ -112,6 +114,22 @@
             font-size: 0.85em;
             opacity: 0.7;
             margin-top: 15px;
+        }
+        
+        .retry-button {
+            background: #333;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.3s ease;
+        }
+        
+        .retry-button:hover {
+            background: #444;
         }
     </style>
 </head>
@@ -155,9 +173,15 @@
                 authButton.addEventListener('click', () => this.startAuth());
             }
             
-            showMessage(text, type = 'error') {
+            showMessage(text, type = 'error', showRetry = false) {
                 const messageEl = document.getElementById('message');
-                messageEl.textContent = text;
+                let messageHtml = text;
+                
+                if (showRetry) {
+                    messageHtml += '<br><button class="retry-button" onclick="location.reload()">Try Again</button>';
+                }
+                
+                messageEl.innerHTML = messageHtml;
                 messageEl.className = `message ${type}`;
             }
             
@@ -199,6 +223,11 @@
                 try {
                     this.showLoading(true);
                     
+                    // Check if crypto API is available
+                    if (!window.crypto || !window.crypto.subtle) {
+                        throw new Error('This browser does not support secure authentication. Please use a modern browser.');
+                    }
+                    
                     // Preserve country parameter
                     const urlParams = new URLSearchParams(window.location.search);
                     const country = urlParams.get('country');
@@ -231,7 +260,7 @@
                     
                 } catch (error) {
                     console.error('Auth setup error:', error);
-                    this.showMessage('Failed to start authentication. Please try again.');
+                    this.showMessage(`Authentication setup failed: ${error.message}`, 'error', true);
                     this.showLoading(false);
                 }
             }
@@ -244,37 +273,54 @@
                     const code = urlParams.get('code');
                     const state = urlParams.get('state');
                     const error = urlParams.get('error');
+                    const errorDescription = urlParams.get('error_description');
                     
-                    // Handle OAuth errors
+                    // Handle OAuth errors with better messaging
                     if (error) {
-                        if (error === 'access_denied') {
-                            this.showMessage('Authorization cancelled. Please try again to play.');
-                        } else {
-                            this.showMessage(`Authentication failed: ${error}`);
+                        let errorMessage = 'Authentication failed';
+                        
+                        switch (error) {
+                            case 'access_denied':
+                                errorMessage = 'Authorization was cancelled. You need to grant access to use the game.';
+                                break;
+                            case 'invalid_client':
+                                errorMessage = 'Application configuration error. Please contact support.';
+                                break;
+                            case 'invalid_request':
+                                errorMessage = 'Invalid authentication request. Please try again.';
+                                break;
+                            case 'server_error':
+                                errorMessage = 'Spotify server error. Please try again in a few moments.';
+                                break;
+                            default:
+                                errorMessage = errorDescription || `Authentication error: ${error}`;
                         }
+                        
+                        this.showMessage(errorMessage, 'error', true);
                         this.clearCallbackUrl();
                         return;
                     }
                     
-                    // Validate state
+                    // Validate state parameter
                     const storedState = sessionStorage.getItem('oauth_state');
                     if (!state || state !== storedState) {
-                        this.showMessage('Security check failed. Please start over.');
+                        this.showMessage('Security validation failed. This may be a security issue or session timeout. Please start over.', 'error', true);
                         this.clearSession();
                         this.clearCallbackUrl();
                         return;
                     }
                     
-                    // Get code verifier
-                    const codeVerifier = sessionStorage.getItem('code_verifier');
-                    if (!codeVerifier) {
-                        this.showMessage('Session expired. Please start over.');
+                    // Check for authorization code
+                    if (!code) {
+                        this.showMessage('No authorization code received from Spotify. Please try again.', 'error', true);
                         this.clearCallbackUrl();
                         return;
                     }
                     
-                    if (!code) {
-                        this.showMessage('No authorization code received. Please try again.');
+                    // Get stored code verifier
+                    const codeVerifier = sessionStorage.getItem('code_verifier');
+                    if (!codeVerifier) {
+                        this.showMessage('Authentication session expired. Please start the login process again.', 'error', true);
                         this.clearCallbackUrl();
                         return;
                     }
@@ -284,7 +330,7 @@
                     
                 } catch (error) {
                     console.error('Callback handling error:', error);
-                    this.showMessage('Authentication failed. Please try again.');
+                    this.showMessage(`Authentication processing failed: ${error.message}`, 'error', true);
                     this.showLoading(false);
                 }
             }
@@ -306,23 +352,44 @@
                     });
                     
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error}`);
+                        const errorData = await response.json().catch(() => ({}));
+                        let errorMessage = 'Failed to complete authentication';
+                        
+                        switch (errorData.error) {
+                            case 'invalid_grant':
+                                errorMessage = 'Authorization code expired. Please try logging in again.';
+                                break;
+                            case 'invalid_client':
+                                errorMessage = 'Application configuration error. Please contact support.';
+                                break;
+                            case 'invalid_request':
+                                errorMessage = 'Authentication request was invalid. Please try again.';
+                                break;
+                            default:
+                                errorMessage = errorData.error_description || `Authentication error: ${errorData.error || response.status}`;
+                        }
+                        
+                        throw new Error(errorMessage);
                     }
                     
                     const tokens = await response.json();
                     
+                    // Validate token response
+                    if (!tokens.access_token) {
+                        throw new Error('Invalid token response from Spotify');
+                    }
+                    
                     // Calculate expiration time
                     const expiresAt = Date.now() + (tokens.expires_in * 1000);
                     
-                    // Store tokens
+                    // Store tokens securely
                     sessionStorage.setItem('access_token', tokens.access_token);
                     if (tokens.refresh_token) {
                         sessionStorage.setItem('refresh_token', tokens.refresh_token);
                     }
                     sessionStorage.setItem('expires_at', expiresAt.toString());
                     
-                    // Generate bootstrap nonce
+                    // Generate bootstrap nonce for additional security
                     const bootstrapNonce = this.generateState();
                     sessionStorage.setItem('bootstrap_nonce', bootstrapNonce);
                     
@@ -339,16 +406,16 @@
                         gameUrl += `&country=${encodeURIComponent(country)}`;
                     }
                     
-                    this.showMessage('Success! Redirecting to game...', 'success');
+                    this.showMessage('Authentication successful! Redirecting to game...', 'success');
                     
-                    // Navigate to game
+                    // Navigate to game with a slight delay for user feedback
                     setTimeout(() => {
                         window.location.href = gameUrl;
-                    }, 1000);
+                    }, 1500);
                     
                 } catch (error) {
                     console.error('Token exchange error:', error);
-                    this.showMessage(error.message || 'Failed to complete authentication');
+                    this.showMessage(error.message || 'Failed to complete authentication', 'error', true);
                     this.clearSession();
                     this.showLoading(false);
                 }
@@ -357,18 +424,3 @@
             clearSession() {
                 sessionStorage.removeItem('code_verifier');
                 sessionStorage.removeItem('oauth_state');
-                sessionStorage.removeItem('auth_country');
-            }
-            
-            clearCallbackUrl() {
-                // Clear URL parameters without reload
-                window.history.replaceState({}, document.title, window.location.pathname);
-                this.showLoading(false);
-            }
-        }
-        
-        // Initialize authentication
-        new SpotifyAuth();
-    </script>
-</body>
-</html>
