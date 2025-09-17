@@ -2,15 +2,25 @@
 // Enhanced version with HTTPS enforcement and better environment detection
 
 const CONFIG = (() => {
-  const currentHost = window.location.origin;
-  const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1') || currentHost.includes('192.168.');
-  
-  // Production host - your actual Vercel domain
+  const currentOrigin = window.location.origin;
+  const protocol = window.location.protocol;
+  const isFileProtocol = protocol === 'file:';
+  const isLocalHost = currentOrigin.includes('localhost') ||
+                      currentOrigin.includes('127.0.0.1') ||
+                      currentOrigin.includes('192.168.') ||
+                      isFileProtocol;
+
+  // Production host - your primary deployment domain
   const PROD_HOST = 'https://rhythm-game-phi.vercel.app';
-  
+
+  const hasValidOrigin = currentOrigin && currentOrigin !== 'null';
+  const normalizedOrigin = hasValidOrigin ? currentOrigin.replace(/\/$/, '') : null;
+
   const config = {
-    IS_LOCAL: isLocal,
-    HOST: isLocal ? currentHost : PROD_HOST,
+    IS_LOCAL: isLocalHost,
+    HOST: isLocalHost
+      ? (normalizedOrigin || 'http://localhost')
+      : (normalizedOrigin || PROD_HOST),
     
     // Spotify App Credentials
     CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
@@ -40,15 +50,24 @@ const CONFIG = (() => {
   };
   
   // Derive URLs
-  config.AUTH_REDIRECT_URI = `${config.HOST}/auth.html`;
+  config.AUTH_REDIRECT_URI = `${config.HOST.replace(/\/$/, '')}/auth.html`;
   config.GAME_URL = `${config.HOST}/rhythm.html`;
   config.INDEX_URL = `${config.HOST}/index.html`;
-  
+
   // HTTPS enforcement for production
-  if (!config.IS_LOCAL && location.protocol !== 'https:') {
+  if (!config.IS_LOCAL && location.protocol !== 'https:' && hasValidOrigin) {
     location.replace(`https:${location.href.substring(location.protocol.length)}`);
   }
-  
+
+  // Surface helpful diagnostic information for unexpected hosts
+  if (!config.IS_LOCAL && config.HOST !== PROD_HOST) {
+    console.warn('[CONFIG] Using non-standard production host', {
+      currentOrigin: config.HOST,
+      expectedHost: PROD_HOST,
+      message: 'Ensure this origin is added to the Spotify app redirect URI allowlist.'
+    });
+  }
+
   return config;
 })();
 
