@@ -13,7 +13,7 @@ const CONFIG = (() => {
     HOST: isLocal ? currentHost : PROD_HOST,
     
     // Spotify App Credentials
-    CLIENT_ID: '314f6b8f332041dcb5f678b85acf36ea',
+    CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
     
     // Scopes required for the game
     SCOPES: [
