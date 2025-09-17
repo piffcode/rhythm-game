@@ -1,164 +1,310 @@
-// Cloudflare Worker for Spotify Token Exchange (Optional)
-// Only needed if you want to hide client credentials or add server-side validation
+// Cloudflare Worker for Spotify Token Management with HttpOnly Sessions
+
+const SESSION_COOKIE = 'spotify_session';
+const SESSION_STORE = globalThis.__RHYTHM_SESSION_STORE__ || new Map();
+const SESSION_TTL_SECONDS = 3600;
+const TOKEN_REFRESH_GRACE_SECONDS = 300;
+
+globalThis.__RHYTHM_SESSION_STORE__ = SESSION_STORE;
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
 
-async function handleRequest(request) {
-  // CORS headers for all responses
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*', // Restrict to your domain in production
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
-
-  // Handle preflight requests
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  // Only handle POST requests to /api/token
-  if (request.method !== 'POST' || !request.url.endsWith('/api/token')) {
-    return new Response('Not Found', { status: 404, headers: corsHeaders });
-  }
-
-  try {
-    const body = await request.formData();
-    const grantType = body.get('grant_type');
-    
-    // Environment variables to set in Cloudflare Worker:
-    // SPOTIFY_CLIENT_ID - Your Spotify app client ID
-    // SPOTIFY_CLIENT_SECRET - Your Spotify app client secret (if using confidential client)
-    // ALLOWED_ORIGINS - Comma-separated list of allowed origins
-    
-    const clientId = SPOTIFY_CLIENT_ID;
-    const clientSecret = SPOTIFY_CLIENT_SECRET || null; // Optional for PKCE
-    const allowedOrigins = (ALLOWED_ORIGINS || '').split(',');
-    
-    // Validate origin if configured
-    const origin = request.headers.get('Origin');
-    if (allowedOrigins.length > 0 && !allowedOrigins.includes(origin)) {
-      return new Response('Forbidden', { status: 403, headers: corsHeaders });
+function parseCookies(header) {
+  if (!header) return {};
+  return header.split(';').reduce((acc, cookie) => {
+    const [name, value] = cookie.trim().split('=');
+    if (name && value) {
+      acc[name] = value;
     }
+    return acc;
+  }, {});
+}
 
-    // Build Spotify token request
-    const tokenRequestBody = new URLSearchParams();
-    tokenRequestBody.append('client_id', clientId);
-    tokenRequestBody.append('grant_type', grantType);
+function generateBootstrap() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
-    // Handle different grant types
-    if (grantType === 'authorization_code') {
-      // PKCE authorization code exchange
-      tokenRequestBody.append('code', body.get('code'));
-      tokenRequestBody.append('redirect_uri', body.get('redirect_uri'));
-      tokenRequestBody.append('code_verifier', body.get('code_verifier'));
-      
-    } else if (grantType === 'refresh_token') {
-      // Token refresh
-      tokenRequestBody.append('refresh_token', body.get('refresh_token'));
-      
-    } else {
-      return new Response('Unsupported grant type', { status: 400, headers: corsHeaders });
-    }
-
-    // Prepare headers for Spotify request
-    const spotifyHeaders = {
-      'Content-Type': 'application/x-www-form-urlencoded',
+function getCorsHeaders(origin) {
+  const allowed = (ALLOWED_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
+  if (allowed.length === 0 || allowed.includes(origin)) {
+    return {
+      'Access-Control-Allow-Origin': origin || '*',
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
     };
+  }
 
-    // Add client secret if using confidential client flow
-    if (clientSecret) {
-      const credentials = btoa(`${clientId}:${clientSecret}`);
-      spotifyHeaders['Authorization'] = `Basic ${credentials}`;
+  return {
+    'Access-Control-Allow-Origin': 'null',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  };
+}
+
+function cleanupSessions() {
+  const now = Date.now();
+  for (const [id, session] of SESSION_STORE.entries()) {
+    if (!session || now >= session.expiresAt + (TOKEN_REFRESH_GRACE_SECONDS * 1000)) {
+      SESSION_STORE.delete(id);
     }
-
-    // Make request to Spotify
-    const spotifyResponse = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: spotifyHeaders,
-      body: tokenRequestBody,
-    });
-
-    // Forward Spotify response
-    const spotifyData = await spotifyResponse.json();
-    
-    if (!spotifyResponse.ok) {
-      return new Response(JSON.stringify({
-        error: spotifyData.error || 'token_exchange_failed',
-        error_description: spotifyData.error_description || 'Failed to exchange token'
-      }), {
-        status: spotifyResponse.status,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
-      });
-    }
-
-    // Optional: Add logging/telemetry here
-    console.log(`Token ${grantType} successful for origin: ${origin}`);
-
-    // Return successful token response
-    return new Response(JSON.stringify(spotifyData), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-      },
-    });
-
-  } catch (error) {
-    console.error('Token exchange error:', error);
-    
-    return new Response(JSON.stringify({
-      error: 'server_error',
-      error_description: 'Internal server error during token exchange'
-    }), {
-      status: 500,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-      },
-    });
   }
 }
 
-/* 
-DEPLOYMENT INSTRUCTIONS:
+function getSession(request) {
+  const cookies = parseCookies(request.headers.get('Cookie'));
+  const sessionId = cookies[SESSION_COOKIE];
+  if (!sessionId) return null;
 
-1. Create new Cloudflare Worker
-2. Copy this code to worker script
-3. Set environment variables:
-   - SPOTIFY_CLIENT_ID: Your app's client ID
-   - SPOTIFY_CLIENT_SECRET: Only if using confidential client (optional for PKCE)
-   - ALLOWED_ORIGINS: e.g., "https://yoursite.com,http://localhost:8000"
+  const session = SESSION_STORE.get(sessionId);
+  if (!session) return null;
 
-4. Deploy worker to custom route: https://your-worker.your-domain.workers.dev
+  if (Date.now() >= session.expiresAt + (TOKEN_REFRESH_GRACE_SECONDS * 1000)) {
+    SESSION_STORE.delete(sessionId);
+    return null;
+  }
 
-5. Update your frontend to use worker endpoint:
-   
-   // In auth.html, replace direct token call:
-   const response = await fetch('https://your-worker.your-domain.workers.dev/api/token', {
-     method: 'POST',
-     headers: {
-       'Content-Type': 'application/x-www-form-urlencoded',
-     },
-     body: new URLSearchParams({
-       client_id: CONFIG.CLIENT_ID,
-       grant_type: 'authorization_code',
-       code: code,
-       redirect_uri: CONFIG.AUTH_REDIRECT_URI,
-       code_verifier: codeVerifier
-     })
-   });
+  return { id: sessionId, data: session };
+}
 
-WHEN TO USE WORKER:
-- If you want to hide client credentials (confidential client flow)
-- If you need server-side token validation/logging
-- If you want to add rate limiting or additional security
+function persistSession(sessionId, session) {
+  SESSION_STORE.set(sessionId, session);
+}
 
-WHEN NOT NEEDED:
-- PKCE public client flow works fine without worker
-- Direct browser-to-Spotify calls are officially supported
-- Adds complexity and latency for minimal security benefit in PKCE flow
-*/
+async function exchangeAuthorizationCode(body, origin) {
+  const code = body.get('code');
+  const redirectUri = body.get('redirect_uri');
+  const codeVerifier = body.get('code_verifier');
+
+  if (!code || !redirectUri || !codeVerifier) {
+    return jsonResponse({ error: 'invalid_request', error_description: 'Missing OAuth parameters' }, 400, origin);
+  }
+
+  const tokenBody = new URLSearchParams();
+  tokenBody.append('client_id', SPOTIFY_CLIENT_ID);
+  tokenBody.append('grant_type', 'authorization_code');
+  tokenBody.append('code', code);
+  tokenBody.append('redirect_uri', redirectUri);
+  tokenBody.append('code_verifier', codeVerifier);
+
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (typeof SPOTIFY_CLIENT_SECRET === 'string' && SPOTIFY_CLIENT_SECRET.length > 0) {
+    const credentials = btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`);
+    headers['Authorization'] = `Basic ${credentials}`;
+  }
+
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers,
+    body: tokenBody
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return jsonResponse({
+      error: data.error || 'token_exchange_failed',
+      error_description: data.error_description || 'Failed to exchange token'
+    }, response.status, origin);
+  }
+
+  if (!data.access_token || !data.refresh_token || typeof data.expires_in !== 'number') {
+    return jsonResponse({
+      error: 'invalid_response',
+      error_description: 'Spotify did not return the expected tokens'
+    }, 502, origin);
+  }
+
+  const sessionId = crypto.randomUUID();
+  const bootstrap = generateBootstrap();
+  const expiresAt = Date.now() + (data.expires_in * 1000);
+
+  persistSession(sessionId, {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt,
+    bootstrap
+  });
+
+  const cookie = `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL_SECONDS}`;
+  const headersOut = {
+    ...getCorsHeaders(origin),
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    'Set-Cookie': cookie
+  };
+
+  return new Response(JSON.stringify({ bootstrap }), {
+    status: 200,
+    headers: headersOut
+  });
+}
+
+async function refreshSpotifyToken(session, origin) {
+  if (!session.data.refreshToken) {
+    throw new Error('No refresh token available.');
+  }
+
+  const tokenBody = new URLSearchParams();
+  tokenBody.append('client_id', SPOTIFY_CLIENT_ID);
+  tokenBody.append('grant_type', 'refresh_token');
+  tokenBody.append('refresh_token', session.data.refreshToken);
+
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (typeof SPOTIFY_CLIENT_SECRET === 'string' && SPOTIFY_CLIENT_SECRET.length > 0) {
+    const credentials = btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`);
+    headers['Authorization'] = `Basic ${credentials}`;
+  }
+
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers,
+    body: tokenBody
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error_description || data.error || 'Token refresh failed');
+  }
+
+  if (!data.access_token || typeof data.expires_in !== 'number') {
+    throw new Error('Spotify refresh response was invalid');
+  }
+
+  const updatedSession = {
+    ...session.data,
+    accessToken: data.access_token,
+    expiresAt: Date.now() + (data.expires_in * 1000)
+  };
+
+  if (data.refresh_token) {
+    updatedSession.refreshToken = data.refresh_token;
+  }
+
+  persistSession(session.id, updatedSession);
+  return updatedSession;
+}
+
+async function provideAccessToken(request, origin) {
+  const session = getSession(request);
+  if (!session) {
+    return jsonResponse({ error: 'unauthorized' }, 401, origin);
+  }
+
+  const url = new URL(request.url);
+  const bootstrap = url.searchParams.get('bootstrap');
+  if (!bootstrap || bootstrap !== session.data.bootstrap) {
+    return jsonResponse({ error: 'forbidden' }, 403, origin);
+  }
+
+  let activeSession = session.data;
+  const needsRefresh = Date.now() >= (activeSession.expiresAt - (TOKEN_REFRESH_GRACE_SECONDS * 1000));
+
+  if (needsRefresh) {
+    try {
+      activeSession = await refreshSpotifyToken(session, origin);
+    } catch (error) {
+      SESSION_STORE.delete(session.id);
+      return jsonResponse({ error: 'unauthorized', error_description: error.message }, 401, origin);
+    }
+  }
+
+  const expiresIn = Math.max(0, Math.floor((activeSession.expiresAt - Date.now()) / 1000));
+
+  return new Response(JSON.stringify({
+    access_token: activeSession.accessToken,
+    expires_in: expiresIn
+  }), {
+    status: 200,
+    headers: {
+      ...getCorsHeaders(origin),
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function validateSession(request, origin) {
+  const session = getSession(request);
+  if (!session) {
+    return jsonResponse({ valid: false }, 401, origin);
+  }
+
+  const body = await request.json().catch(() => ({}));
+  if (!body.bootstrap || body.bootstrap !== session.data.bootstrap) {
+    return jsonResponse({ valid: false }, 403, origin);
+  }
+
+  return new Response(JSON.stringify({ valid: true }), {
+    status: 200,
+    headers: {
+      ...getCorsHeaders(origin),
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function logoutSession(request, origin) {
+  const session = getSession(request);
+  if (session) {
+    SESSION_STORE.delete(session.id);
+  }
+
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...getCorsHeaders(origin),
+      'Set-Cookie': `${SESSION_COOKIE}=deleted; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`
+    }
+  });
+}
+
+function jsonResponse(body, status, origin) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...getCorsHeaders(origin),
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    }
+  });
+}
+
+async function handleRequest(request) {
+  cleanupSessions();
+
+  const origin = request.headers.get('Origin');
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: getCorsHeaders(origin) });
+  }
+
+  const url = new URL(request.url);
+
+  if (request.method === 'POST' && url.pathname.endsWith('/api/token')) {
+    const body = await request.formData();
+    const grantType = body.get('grant_type');
+    if (grantType !== 'authorization_code') {
+      return jsonResponse({ error: 'unsupported_grant_type' }, 400, origin);
+    }
+
+    return exchangeAuthorizationCode(body, origin);
+  }
+
+  if (request.method === 'GET' && url.pathname.endsWith('/api/token/access')) {
+    return provideAccessToken(request, origin);
+  }
+
+  if (request.method === 'POST' && url.pathname.endsWith('/api/session/validate')) {
+    return validateSession(request, origin);
+  }
+
+  if (request.method === 'POST' && url.pathname.endsWith('/api/session/logout')) {
+    return logoutSession(request, origin);
+  }
+
+  return jsonResponse({ error: 'not_found' }, 404, origin);
+}
