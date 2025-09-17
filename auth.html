@@ -195,41 +195,14 @@
         <div id="debugInfo" class="debug-info"></div>
     </div>
 
+    <script src="config.js"></script>
     <script>
         // Enhanced configuration with better error handling
-        const CONFIG = (() => {
-            const currentHost = window.location.origin;
-            const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1') || currentHost.includes('192.168.');
-            
-            // Production host - your actual Vercel domain
-            const PROD_HOST = 'https://rhythm-game-phi.vercel.app';
-            
-            const config = {
-                IS_LOCAL: isLocal,
-                HOST: isLocal ? currentHost : PROD_HOST,
-                
-                // Spotify App Credentials
-                CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-                
-                // Scopes required for the game
-                SCOPES: [
-                    'user-read-private',
-                    'user-read-email', 
-                    'user-read-playback-state',
-                    'user-modify-playbook-state',
-                    'streaming',
-                    'playlist-modify-private',
-                    'user-library-modify'
-                ]
-            };
-            
-            // Derive URLs
-            config.AUTH_REDIRECT_URI = `${config.HOST}/auth.html`;
-            config.GAME_URL = `${config.HOST}/rhythm.html`;
-            config.INDEX_URL = `${config.HOST}/index.html`;
-            
-            return config;
-        })();
+        const CONFIG = window.CONFIG;
+
+        if (!CONFIG) {
+            throw new Error('Configuration failed to load. Please verify config.js is available.');
+        }
 
         class SpotifyAuth {
             constructor() {
@@ -286,7 +259,7 @@
                 }
                 
                 // Check client ID
-                if (!CONFIG.CLIENT_ID || CONFIG.CLIENT_ID === '07f4566e6a2a4428ac68ec86d73adf34') {
+                if (!CONFIG.CLIENT_ID) {
                     issues.push('Invalid CLIENT_ID configuration');
                 }
                 
