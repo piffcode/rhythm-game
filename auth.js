@@ -1,433 +1,359 @@
 (() => {
     const CONFIG = window.CONFIG;
     if (!CONFIG) {
-        throw new Error('Configuration failed to load. Please verify config.js is available.');
+        throw new Error('Configuration failed to load. Ensure config.js runs before auth.js.');
     }
 
-    const base64UrlEncode = (bytes) => {
-        return btoa(String.fromCharCode(...bytes))
+    const base64UrlEncode = (input) => {
+        return btoa(String.fromCharCode(...input))
             .replace(/\+/g, '-')
             .replace(/\//g, '_')
-            .replace(/=+$/, '');
+            .replace(/=+$/g, '');
     };
 
-    class SpotifyAuth {
-        constructor() {
-            this.debugLog = [];
-            this.authButton = document.getElementById('authButton');
-            this.messageEl = document.getElementById('message');
-            this.loadingEl = document.getElementById('loading');
-            this.debugInfoEl = document.getElementById('debugInfo');
-            this.debugToggleEl = document.getElementById('debugToggle');
+    const select = (id) => document.getElementById(id);
 
-            this.log('SpotifyAuth initializing');
-            this.setupDebugToggle();
-            this.checkEnvironment();
+    const DOM = {
+        button: select('authButton'),
+        message: select('message'),
+        loading: select('loading'),
+        debugToggle: select('debugToggle'),
+        debug: select('debugInfo')
+    };
 
-            if (window.location.search) {
-                this.log('URL has search params, handling callback');
-                this.handleCallback();
-            } else {
-                this.log('No search params, setting up auth button');
-                this.setupAuthButton();
-            }
+    const createStorage = () => {
+        try {
+            const probe = '__auth_storage_probe__';
+            window.sessionStorage.setItem(probe, '1');
+            window.sessionStorage.removeItem(probe);
+            return {
+                set: (key, value) => window.sessionStorage.setItem(key, value),
+                take: (key) => {
+                    const value = window.sessionStorage.getItem(key);
+                    window.sessionStorage.removeItem(key);
+                    return value;
+                },
+                remove: (key) => window.sessionStorage.removeItem(key)
+            };
+        } catch (error) {
+            const fallback = new Map();
+            return {
+                set: (key, value) => fallback.set(key, value),
+                take: (key) => {
+                    const value = fallback.get(key) || null;
+                    fallback.delete(key);
+                    return value;
+                },
+                remove: (key) => fallback.delete(key)
+            };
+        }
+    };
+
+    const storage = createStorage();
+    const debugLog = [];
+
+    const log = (message, details) => {
+        const entry = `[${new Date().toISOString()}] ${message}`;
+        console.log(entry, details || '');
+        debugLog.push(entry + (details ? ` ${JSON.stringify(details)}` : ''));
+        if (DOM.debug) {
+            DOM.debug.textContent = debugLog.join('\n');
+            DOM.debug.scrollTop = DOM.debug.scrollHeight;
+        }
+    };
+
+    const setButtonState = ({ disabled, label }) => {
+        if (!DOM.button) {
+            return;
         }
 
-        log(message, data = null) {
-            const timestamp = new Date().toISOString();
-            const logEntry = `[${timestamp}] ${message}`;
-            console.log(logEntry, data || '');
-            this.debugLog.push(logEntry + (data ? ` ${JSON.stringify(data)}` : ''));
-            this.updateDebugDisplay();
+        DOM.button.disabled = Boolean(disabled);
+        if (label) {
+            DOM.button.textContent = label;
+        }
+    };
+
+    const toggleLoading = (show) => {
+        if (DOM.loading) {
+            DOM.loading.style.display = show ? 'block' : 'none';
+        }
+        if (DOM.button) {
+            DOM.button.disabled = show;
+            DOM.button.textContent = show ? 'Connecting…' : 'Connect Spotify';
+        }
+    };
+
+    const renderMessage = (text, type = 'error', options = {}) => {
+        if (!DOM.message) {
+            return;
         }
 
-        updateDebugDisplay() {
-            if (!this.debugInfoEl) {
-                return;
-            }
+        DOM.message.className = `message ${type}`;
+        DOM.message.style.display = 'block';
+        DOM.message.replaceChildren();
 
-            this.debugInfoEl.textContent = this.debugLog.join('\n');
-            this.debugInfoEl.scrollTop = this.debugInfoEl.scrollHeight;
+        const paragraph = document.createElement('p');
+        paragraph.textContent = text;
+        DOM.message.appendChild(paragraph);
+
+        if (options.retry) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'retry-button';
+            button.textContent = options.retry.label || 'Try Again';
+            button.addEventListener('click', options.retry.callback);
+            DOM.message.appendChild(button);
         }
 
-        setupDebugToggle() {
-            if (!this.debugToggleEl) {
-                return;
-            }
+        log(`Message displayed: ${type}`, { text });
+    };
 
-            this.debugToggleEl.addEventListener('click', () => {
-                const isVisible = this.debugInfoEl.style.display === 'block';
-                this.debugInfoEl.style.display = isVisible ? 'none' : 'block';
-                this.debugToggleEl.textContent = isVisible ? 'Show Debug Info' : 'Hide Debug Info';
-            });
+    const updateDebugToggle = () => {
+        if (!DOM.debugToggle || !DOM.debug) {
+            return;
         }
 
-        setButtonState({ disabled, label }) {
-            if (!this.authButton) {
-                return;
-            }
+        DOM.debugToggle.addEventListener('click', () => {
+            const isVisible = DOM.debug.style.display === 'block';
+            DOM.debug.style.display = isVisible ? 'none' : 'block';
+            DOM.debugToggle.textContent = isVisible ? 'Show Debug Info' : 'Hide Debug Info';
+        });
+    };
 
-            this.authButton.disabled = disabled;
-            if (label) {
-                this.authButton.textContent = label;
-            }
-        }
-
-        showMessage(text, type = 'error', options = {}) {
-            if (!this.messageEl) {
-                return;
-            }
-
-            this.messageEl.replaceChildren();
-            const paragraph = document.createElement('p');
-            paragraph.textContent = text;
-            this.messageEl.appendChild(paragraph);
-
-            if (options.retry) {
-                const retryButton = document.createElement('button');
-                retryButton.className = 'retry-button';
-                retryButton.type = 'button';
-                retryButton.textContent = options.retry.label || 'Try Again';
-                retryButton.addEventListener('click', () => {
-                    options.retry.callback();
-                });
-                this.messageEl.appendChild(retryButton);
-            }
-
-            this.messageEl.className = `message ${type}`;
-            this.messageEl.style.display = 'block';
-            this.log(`Message shown: ${type}`, text);
-        }
-
-        showLoading(show = true) {
-            if (this.loadingEl) {
-                this.loadingEl.style.display = show ? 'block' : 'none';
-            }
-
-            if (this.authButton) {
-                this.authButton.disabled = show;
-                this.authButton.textContent = show ? 'Connecting...' : 'Connect Spotify';
-            }
-
-            this.log(`Loading state: ${show}`);
-        }
-
-        ensureSecureContext() {
-            const secureContext = window.isSecureContext || CONFIG.IS_LOCAL;
-            if (!secureContext) {
-                this.log('Insecure context detected');
-                this.setButtonState({ disabled: true, label: 'HTTPS Required' });
-                this.showMessage('Secure context required. Please use HTTPS to continue.', 'error', {
-                    retry: {
-                        label: 'Reload',
-                        callback: () => window.location.reload()
-                    }
-                });
-                return false;
-            }
-
+    const ensureSecureContext = () => {
+        if (window.isSecureContext || CONFIG.IS_LOCAL) {
             return true;
         }
 
-        ensureCryptoAvailable() {
-            if (!window.crypto || !window.crypto.getRandomValues || !window.crypto.subtle) {
-                this.log('Required Web Crypto APIs unavailable');
-                this.setButtonState({ disabled: true, label: 'Unsupported Browser' });
-                this.showMessage('Modern browser with Web Crypto support required to complete login.', 'error');
-                return false;
+        renderMessage('Secure context required. Please use HTTPS to continue.', 'error', {
+            retry: {
+                label: 'Reload',
+                callback: () => window.location.reload()
             }
+        });
+        setButtonState({ disabled: true, label: 'HTTPS Required' });
+        return false;
+    };
 
+    const ensureCrypto = () => {
+        if (window.crypto?.getRandomValues && window.crypto?.subtle?.digest) {
             return true;
         }
 
-        checkEnvironment() {
+        renderMessage('Modern browser with Web Crypto support required to complete login.', 'error');
+        setButtonState({ disabled: true, label: 'Unsupported Browser' });
+        return false;
+    };
+
+    const notifyOpener = (type, payload) => {
+        if (!window.opener || window.opener.closed) {
+            return false;
+        }
+
+        try {
+            window.opener.postMessage({ type, payload }, window.location.origin);
+            return true;
+        } catch (error) {
+            log('Failed to notify opener window', { error: error?.message });
+            return false;
+        }
+    };
+
+    const randomBytes = (length) => {
+        const array = new Uint8Array(length);
+        crypto.getRandomValues(array);
+        return array;
+    };
+
+    const generateCodeVerifier = () => base64UrlEncode(randomBytes(64));
+
+    const generateCodeChallenge = async (verifier) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(verifier);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        return base64UrlEncode(new Uint8Array(digest));
+    };
+
+    const generateState = () => base64UrlEncode(randomBytes(32));
+
+    const clearTransientData = () => {
+        ['code_verifier', 'oauth_state', 'auth_country'].forEach((key) => {
+            storage.remove(key);
+        });
+    };
+
+    const beginAuth = async () => {
+        try {
+            if (!ensureSecureContext() || !ensureCrypto()) {
+                return;
+            }
+
             const clientId = (CONFIG.CLIENT_ID || '').trim();
-            const issues = [];
-
-            if (!this.ensureSecureContext()) {
-                issues.push('secure_context');
-            }
-
-            if (!this.ensureCryptoAvailable()) {
-                issues.push('crypto_missing');
-            }
-
             if (!clientId) {
-                issues.push('client_id_missing');
-                this.showMessage('Spotify client ID is not configured. Please inject it before loading this page.', 'error');
-                this.setButtonState({ disabled: true, label: 'Configuration Error' });
+                throw new Error('Spotify client ID is not configured.');
             }
 
-            try {
-                new URL(CONFIG.AUTH_REDIRECT_URI);
-            } catch (error) {
-                issues.push('invalid_redirect');
-            }
+            toggleLoading(true);
 
-            this.log('Environment check', {
-                host: CONFIG.HOST,
-                isLocal: CONFIG.IS_LOCAL,
-                protocol: window.location.protocol,
-                secureContext: window.isSecureContext,
-                clientIdPresent: Boolean(clientId),
-                redirectUri: CONFIG.AUTH_REDIRECT_URI,
-                issues
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            const state = generateState();
+
+            const params = new URLSearchParams({
+                client_id: clientId,
+                response_type: 'code',
+                redirect_uri: CONFIG.AUTH_REDIRECT_URI,
+                code_challenge_method: 'S256',
+                code_challenge: challenge,
+                state,
+                scope: (CONFIG.SCOPES || []).join(' ')
             });
 
-            return issues.length === 0;
-        }
+            const country = new URLSearchParams(window.location.search).get('country');
+            storage.set('code_verifier', verifier);
+            storage.set('oauth_state', state);
+            if (country) {
+                storage.set('auth_country', country);
+            }
 
-        setupAuthButton() {
-            if (!this.authButton) {
+            const authorizeUrl = `${CONFIG.TOKEN_ENDPOINTS.AUTHORIZE}?${params.toString()}`;
+            log('Redirecting to Spotify authorization', { authorizeUrl });
+            window.location.assign(authorizeUrl);
+        } catch (error) {
+            log('Authentication setup failed', { error: error?.message });
+            console.error('Authentication setup failed:', error);
+            renderMessage(`Authentication setup failed: ${error.message}`, 'error', {
+                retry: {
+                    label: 'Try Again',
+                    callback: () => window.location.reload()
+                }
+            });
+            toggleLoading(false);
+            if (notifyOpener('spotify-auth-error', { message: error.message })) {
+                setTimeout(() => window.close(), 1000);
+            }
+        }
+    };
+
+    const exchangeCode = async () => {
+        try {
+            if (!ensureSecureContext() || !ensureCrypto()) {
                 return;
             }
 
-            this.authButton.addEventListener('click', (event) => {
+            toggleLoading(true);
+
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+            const state = params.get('state');
+            const error = params.get('error');
+            const errorDescription = params.get('error_description');
+
+            if (error) {
+                throw new Error(errorDescription || `Authentication error: ${error}`);
+            }
+
+            if (!code || !state) {
+                throw new Error('Missing authorization response parameters.');
+            }
+
+            const storedState = storage.take('oauth_state');
+            if (!storedState || storedState !== state) {
+                throw new Error('State validation failed. Please restart the login process.');
+            }
+
+            const verifier = storage.take('code_verifier');
+            if (!verifier) {
+                throw new Error('Authentication session expired. Please start over.');
+            }
+
+            const response = await fetch(CONFIG.TOKEN_ENDPOINTS.EXCHANGE, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                credentials: 'include',
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: CONFIG.AUTH_REDIRECT_URI,
+                    code_verifier: verifier
+                })
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error_description || errorBody.error || 'Token exchange failed.');
+            }
+
+            const body = await response.json();
+            const bootstrap = body.bootstrap;
+            if (!bootstrap) {
+                throw new Error('Token service did not return a bootstrap value.');
+            }
+
+            const country = storage.take('auth_country');
+            const search = new URLSearchParams({ bootstrap });
+            if (country) {
+                search.set('country', country);
+            }
+
+            const gameUrl = `${CONFIG.GAME_URL}?${search.toString()}`;
+            renderMessage('Authentication successful! Redirecting to game…', 'success');
+            log('Redirecting to game', { gameUrl });
+
+            if (notifyOpener('spotify-auth-success', { gameUrl })) {
+                setTimeout(() => window.close(), 800);
+            } else {
+                window.location.replace(gameUrl);
+            }
+        } catch (error) {
+            log('Token exchange error', { error: error?.message });
+            console.error('Token exchange error:', error);
+            renderMessage(error.message || 'Failed to complete authentication', 'error', {
+                retry: {
+                    label: 'Restart Login',
+                    callback: () => {
+                        clearTransientData();
+                        window.location.href = CONFIG.AUTH_REDIRECT_URI;
+                    }
+                }
+            });
+            toggleLoading(false);
+            if (notifyOpener('spotify-auth-error', { message: error.message })) {
+                setTimeout(() => window.close(), 1000);
+            }
+        } finally {
+            clearTransientData();
+        }
+    };
+
+    const initialize = () => {
+        log('SpotifyAuth initialize', {
+            isSecureContext: window.isSecureContext,
+            hasCrypto: Boolean(window.crypto?.getRandomValues && window.crypto?.subtle?.digest),
+            clientIdPresent: Boolean((CONFIG.CLIENT_ID || '').trim()),
+            redirectUri: CONFIG.AUTH_REDIRECT_URI
+        });
+
+        updateDebugToggle();
+
+        if (window.location.search) {
+            exchangeCode();
+        } else if (DOM.button) {
+            DOM.button.addEventListener('click', (event) => {
                 event.preventDefault();
-                this.log('Auth button clicked');
-                this.startAuth();
+                beginAuth();
             });
         }
-
-        async generateCodeVerifier() {
-            if (!this.ensureCryptoAvailable()) {
-                throw new Error('Secure random generator unavailable.');
-            }
-
-            const array = new Uint8Array(64);
-            crypto.getRandomValues(array);
-            return base64UrlEncode(array);
-        }
-
-        async generateCodeChallenge(verifier) {
-            if (!this.ensureCryptoAvailable()) {
-                throw new Error('Unable to compute code challenge securely.');
-            }
-
-            const encoder = new TextEncoder();
-            const data = encoder.encode(verifier);
-            const digest = await crypto.subtle.digest('SHA-256', data);
-            return base64UrlEncode(new Uint8Array(digest));
-        }
-
-        async generateState() {
-            if (!this.ensureCryptoAvailable()) {
-                throw new Error('Unable to generate secure state parameter.');
-            }
-
-            const array = new Uint8Array(32);
-            crypto.getRandomValues(array);
-            return base64UrlEncode(array);
-        }
-
-        persistTransient(key, value) {
-            window.sessionStorage.setItem(key, value);
-        }
-
-        consumeTransient(key) {
-            const value = window.sessionStorage.getItem(key);
-            window.sessionStorage.removeItem(key);
-            return value;
-        }
-
-        notifyOpener(type, payload) {
-            if (!window.opener || window.opener.closed) {
-                return false;
-            }
-
-            try {
-                window.opener.postMessage({ type, payload }, window.location.origin);
-                return true;
-            } catch (error) {
-                this.log('Failed to notify opener', error.message);
-                return false;
-            }
-        }
-
-        async startAuth() {
-            try {
-                if (!this.ensureSecureContext() || !this.ensureCryptoAvailable()) {
-                    return;
-                }
-
-                const clientId = (CONFIG.CLIENT_ID || '').trim();
-                if (!clientId) {
-                    throw new Error('Spotify client ID is not configured correctly.');
-                }
-
-                this.showLoading(true);
-
-                const urlParams = new URLSearchParams(window.location.search);
-                const country = urlParams.get('country');
-
-                const codeVerifier = await this.generateCodeVerifier();
-                const codeChallenge = await this.generateCodeChallenge(codeVerifier);
-                const state = await this.generateState();
-
-                this.log('PKCE parameters generated', {
-                    verifierLength: codeVerifier.length,
-                    challengeLength: codeChallenge.length,
-                    stateLength: state.length
-                });
-
-                this.persistTransient('code_verifier', codeVerifier);
-                this.persistTransient('oauth_state', state);
-                if (country) {
-                    this.persistTransient('auth_country', country);
-                }
-
-                const params = new URLSearchParams({
-                    client_id: clientId,
-                    response_type: 'code',
-                    redirect_uri: CONFIG.AUTH_REDIRECT_URI,
-                    code_challenge_method: 'S256',
-                    code_challenge: codeChallenge,
-                    state,
-                    scope: CONFIG.SCOPES.join(' ')
-                });
-
-                const authUrl = `${CONFIG.TOKEN_ENDPOINTS.AUTHORIZE}?${params.toString()}`;
-                this.log('Redirecting to Spotify authorization', {
-                    url: authUrl.substring(0, 100) + '...'
-                });
-
-                window.location.href = authUrl;
-            } catch (error) {
-                this.log('Auth setup error', error.message);
-                console.error('Auth setup error:', error);
-                const notified = this.notifyOpener('spotify-auth-error', { message: `Authentication setup failed: ${error.message}` });
-                this.showMessage(`Authentication setup failed: ${error.message}`, 'error', {
-                    retry: {
-                        label: 'Try Again',
-                        callback: () => window.location.reload()
-                    }
-                });
-                this.showLoading(false);
-                if (notified) {
-                    setTimeout(() => window.close(), 1000);
-                }
-            }
-        }
-
-        async handleCallback() {
-            try {
-                if (!this.ensureSecureContext() || !this.ensureCryptoAvailable()) {
-                    return;
-                }
-
-                this.showLoading(true);
-
-                const urlParams = new URLSearchParams(window.location.search);
-                const code = urlParams.get('code');
-                const state = urlParams.get('state');
-                const error = urlParams.get('error');
-                const errorDescription = urlParams.get('error_description');
-
-                this.log('Callback parameters', {
-                    hasCode: Boolean(code),
-                    hasState: Boolean(state),
-                    error,
-                    errorDescription
-                });
-
-                if (error) {
-                    const message = errorDescription || `Authentication error: ${error}`;
-                    throw new Error(message);
-                }
-
-                if (!code || !state) {
-                    throw new Error('Missing authorization response parameters.');
-                }
-
-                const storedState = this.consumeTransient('oauth_state');
-                if (!storedState || storedState !== state) {
-                    throw new Error('State validation failed. Please restart the login process.');
-                }
-
-                const codeVerifier = this.consumeTransient('code_verifier');
-                if (!codeVerifier) {
-                    throw new Error('Authentication session expired. Please start over.');
-                }
-
-                const tokenResponse = await fetch(CONFIG.TOKEN_ENDPOINTS.EXCHANGE, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    credentials: 'include',
-                    body: new URLSearchParams({
-                        grant_type: 'authorization_code',
-                        code,
-                        redirect_uri: CONFIG.AUTH_REDIRECT_URI,
-                        code_verifier: codeVerifier
-                    })
-                });
-
-                if (!tokenResponse.ok) {
-                    const errorData = await tokenResponse.json().catch(() => ({}));
-                    throw new Error(errorData.error_description || errorData.error || 'Token exchange failed.');
-                }
-
-                const tokenData = await tokenResponse.json();
-                const bootstrap = tokenData.bootstrap;
-                if (!bootstrap) {
-                    throw new Error('Token service did not return a bootstrap value.');
-                }
-
-                const country = this.consumeTransient('auth_country');
-
-                let gameUrl = `${CONFIG.GAME_URL}?bootstrap=${encodeURIComponent(bootstrap)}`;
-                if (country) {
-                    gameUrl += `&country=${encodeURIComponent(country)}`;
-                }
-
-                this.showMessage('Authentication successful! Redirecting to game...', 'success');
-                this.log('Redirecting to game', { gameUrl });
-
-                const notified = this.notifyOpener('spotify-auth-success', { gameUrl });
-                if (notified) {
-                    setTimeout(() => window.close(), 800);
-                } else {
-                    window.location.replace(gameUrl);
-                }
-            } catch (error) {
-                this.log('Token exchange error', error.message);
-                console.error('Token exchange error:', error);
-                const notified = this.notifyOpener('spotify-auth-error', { message: error.message || 'Failed to complete authentication' });
-                this.showMessage(error.message || 'Failed to complete authentication', 'error', {
-                    retry: {
-                        label: 'Restart Login',
-                        callback: () => {
-                            window.location.href = CONFIG.AUTH_REDIRECT_URI;
-                        }
-                    }
-                });
-                this.showLoading(false);
-                this.clearTransientData();
-                if (notified) {
-                    setTimeout(() => window.close(), 1000);
-                }
-            }
-        }
-
-        clearTransientData() {
-            window.sessionStorage.removeItem('code_verifier');
-            window.sessionStorage.removeItem('oauth_state');
-            window.sessionStorage.removeItem('auth_country');
-        }
-    }
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
         try {
-            new SpotifyAuth();
+            initialize();
         } catch (error) {
-            console.error('Failed to initialize auth:', error);
-            const messageEl = document.getElementById('message');
-            if (messageEl) {
-                messageEl.className = 'message error';
-                messageEl.style.display = 'block';
-                messageEl.textContent = `Failed to initialize: ${error.message}`;
-            }
+            console.error('Failed to initialize auth.js', error);
+            renderMessage(`Failed to initialize: ${error.message}`, 'error');
         }
     });
 
@@ -435,10 +361,10 @@
         if (!event.error) {
             return;
         }
-        console.error('Global error:', event.error);
+        log('Global error event captured', { message: event.error.message });
     });
 
     window.addEventListener('unhandledrejection', (event) => {
-        console.error('Unhandled promise rejection:', event.reason);
+        log('Unhandled promise rejection', { reason: event.reason?.message || String(event.reason) });
     });
 })();
