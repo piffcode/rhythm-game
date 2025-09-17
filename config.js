@@ -16,29 +16,53 @@ const CONFIG = (() => {
   const hasValidOrigin = currentOrigin && currentOrigin !== 'null';
   const normalizedOrigin = hasValidOrigin ? currentOrigin.replace(/\/$/, '') : null;
 
+  const readInjectedValue = (metaName, globalKey) => {
+    if (typeof window === 'undefined') return null;
+
+    if (globalKey && typeof window[globalKey] === 'string') {
+      const value = window[globalKey].trim();
+      if (value) {
+        return value;
+      }
+    }
+
+    if (metaName && typeof document !== 'undefined') {
+      const meta = document.querySelector(`meta[name="${metaName}"]`);
+      if (meta) {
+        const value = (meta.getAttribute('content') || '').trim();
+        if (value) {
+          return value;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const injectedClientId = readInjectedValue('spotify-client-id', '__SPOTIFY_CLIENT_ID__');
+  const tokenServiceBase = readInjectedValue('token-service-base-url', '__TOKEN_SERVICE_BASE_URL__');
+
   const config = {
     IS_LOCAL: isLocalHost,
     HOST: isLocalHost
       ? (normalizedOrigin || 'http://localhost')
       : (normalizedOrigin || PROD_HOST),
-    
-    // Spotify App Credentials
-    CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-    
+
+    // Spotify App Credentials (must be injected at runtime)
+    CLIENT_ID: injectedClientId,
+
     // Scopes required for the game
     SCOPES: [
       'user-read-private',
-      'user-read-email', 
       'user-read-playback-state',
       'user-modify-playback-state',
       'streaming',
-      'playlist-modify-private',
       'user-library-modify'
     ],
-    
+
     // Telemetry (optional)
     TELEMETRY_URL: null, // Set to your analytics endpoint if needed
-    
+
     // Game settings
     GAME_SETTINGS: {
       PLAYLIST_SIZE: 3,
@@ -50,9 +74,19 @@ const CONFIG = (() => {
   };
   
   // Derive URLs
-  config.AUTH_REDIRECT_URI = `${config.HOST.replace(/\/$/, '')}/auth.html`;
+  const normalizedHost = config.HOST.replace(/\/$/, '');
+  const serviceBase = (tokenServiceBase || normalizedHost).replace(/\/$/, '');
+
+  config.AUTH_REDIRECT_URI = `${normalizedHost}/auth.html`;
   config.GAME_URL = `${config.HOST}/rhythm.html`;
   config.INDEX_URL = `${config.HOST}/index.html`;
+  config.TOKEN_ENDPOINTS = {
+    AUTHORIZE: 'https://accounts.spotify.com/authorize',
+    EXCHANGE: `${serviceBase}/api/token`,
+    ACCESS: `${serviceBase}/api/token/access`,
+    VALIDATE_SESSION: `${serviceBase}/api/session/validate`,
+    LOGOUT: `${serviceBase}/api/session/logout`
+  };
 
   // HTTPS enforcement for production
   if (!config.IS_LOCAL && location.protocol !== 'https:' && hasValidOrigin) {
@@ -66,6 +100,10 @@ const CONFIG = (() => {
       expectedHost: PROD_HOST,
       message: 'Ensure this origin is added to the Spotify app redirect URI allowlist.'
     });
+  }
+
+  if (!config.CLIENT_ID) {
+    console.warn('[CONFIG] Spotify client ID was not injected. Set window.__SPOTIFY_CLIENT_ID__ or add a <meta name="spotify-client-id"> tag before loading config.js.');
   }
 
   return config;
