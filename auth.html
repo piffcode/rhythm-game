@@ -195,41 +195,14 @@
         <div id="debugInfo" class="debug-info"></div>
     </div>
 
+    <script src="config.js"></script>
     <script>
         // Enhanced configuration with better error handling
-        const CONFIG = (() => {
-            const currentHost = window.location.origin;
-            const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1') || currentHost.includes('192.168.');
-            
-            // Production host - your actual Vercel domain
-            const PROD_HOST = 'https://rhythm-game-phi.vercel.app';
-            
-            const config = {
-                IS_LOCAL: isLocal,
-                HOST: isLocal ? currentHost : PROD_HOST,
-                
-                // Spotify App Credentials
-                CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-                
-                // Scopes required for the game
-                SCOPES: [
-                    'user-read-private',
-                    'user-read-email', 
-                    'user-read-playback-state',
-                    'user-modify-playbook-state',
-                    'streaming',
-                    'playlist-modify-private',
-                    'user-library-modify'
-                ]
-            };
-            
-            // Derive URLs
-            config.AUTH_REDIRECT_URI = `${config.HOST}/auth.html`;
-            config.GAME_URL = `${config.HOST}/rhythm.html`;
-            config.INDEX_URL = `${config.HOST}/index.html`;
-            
-            return config;
-        })();
+        const CONFIG = window.CONFIG;
+
+        if (!CONFIG) {
+            throw new Error('Configuration failed to load. Please verify config.js is available.');
+        }
 
         class SpotifyAuth {
             constructor() {
@@ -244,7 +217,24 @@
                 this.debugLog.push(logEntry + (data ? ` ${JSON.stringify(data)}` : ''));
                 this.updateDebugDisplay();
             }
-            
+
+            getClientIdInfo() {
+                const rawValue = CONFIG.CLIENT_ID;
+                const value = typeof rawValue === 'string' ? rawValue.trim() : '';
+                const normalized = value.toUpperCase();
+                const placeholderTokens = ['{{', 'YOUR', 'REPLACE', 'ENTER', 'CLIENT_ID'];
+                const looksPlaceholder = placeholderTokens.some(token => normalized.includes(token));
+                const isPresent = value.length > 0;
+                const isValid = isPresent && !looksPlaceholder;
+                const snippet = isPresent ? (value.length <= 8 ? value : `${value.slice(0, 8)}...`) : '(missing)';
+
+                return {
+                    value,
+                    snippet,
+                    isValid
+                };
+            }
+
             updateDebugDisplay() {
                 const debugInfo = document.getElementById('debugInfo');
                 if (debugInfo) {
@@ -274,22 +264,23 @@
             
             checkEnvironment() {
                 const issues = [];
-                
+                const clientIdInfo = this.getClientIdInfo();
+
                 // Check HTTPS requirement
                 if (location.protocol !== 'https:' && !CONFIG.IS_LOCAL) {
                     issues.push('HTTPS required for production');
                 }
-                
+
                 // Check crypto API
                 if (!window.crypto || !window.crypto.subtle) {
                     issues.push('Crypto API not available');
                 }
-                
+
                 // Check client ID
-                if (!CONFIG.CLIENT_ID || CONFIG.CLIENT_ID === '07f4566e6a2a4428ac68ec86d73adf34') {
+                if (!clientIdInfo.isValid) {
                     issues.push('Invalid CLIENT_ID configuration');
                 }
-                
+
                 // Check redirect URI
                 try {
                     new URL(CONFIG.AUTH_REDIRECT_URI);
@@ -301,11 +292,12 @@
                     host: CONFIG.HOST,
                     isLocal: CONFIG.IS_LOCAL,
                     protocol: location.protocol,
-                    clientId: CONFIG.CLIENT_ID.substring(0, 8) + '...',
+                    clientId: clientIdInfo.snippet,
+                    clientIdValid: clientIdInfo.isValid,
                     redirectUri: CONFIG.AUTH_REDIRECT_URI,
                     issues: issues
                 });
-                
+
                 if (issues.length > 0) {
                     this.showMessage(`Configuration issues: ${issues.join(', ')}`, 'error', true);
                 }
@@ -416,7 +408,7 @@
                 try {
                     this.log('Starting authentication process');
                     this.showLoading(true);
-                    
+
                     // Check crypto API availability
                     if (!window.crypto) {
                         throw new Error('Crypto API not available. Please use a modern browser (Chrome, Firefox, Safari, Edge).');
@@ -426,7 +418,12 @@
                     const urlParams = new URLSearchParams(window.location.search);
                     const country = urlParams.get('country');
                     this.log('Country parameter', country);
-                    
+
+                    const clientIdInfo = this.getClientIdInfo();
+                    if (!clientIdInfo.isValid) {
+                        throw new Error('Spotify client ID is not configured correctly.');
+                    }
+
                     // Generate PKCE parameters
                     this.log('Generating PKCE parameters');
                     const codeVerifier = this.generateCodeVerifier();
@@ -447,10 +444,10 @@
                     }
                     
                     this.log('Stored session data');
-                    
+
                     // Build authorization URL
                     const params = new URLSearchParams({
-                        client_id: CONFIG.CLIENT_ID,
+                        client_id: clientIdInfo.value,
                         response_type: 'code',
                         redirect_uri: CONFIG.AUTH_REDIRECT_URI,
                         code_challenge_method: 'S256',
@@ -460,10 +457,10 @@
                     });
                     
                     const authUrl = `https://accounts.spotify.com/authorize?${params}`;
-                    
+
                     this.log('Authorization URL built', {
                         url: authUrl.substring(0, 100) + '...',
-                        clientId: CONFIG.CLIENT_ID.substring(0, 8) + '...',
+                        clientId: clientIdInfo.snippet,
                         redirectUri: CONFIG.AUTH_REDIRECT_URI,
                         scopes: CONFIG.SCOPES.length
                     });
