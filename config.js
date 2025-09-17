@@ -28,11 +28,9 @@ const CONFIG = (() => {
     // Scopes required for the game
     SCOPES: [
       'user-read-private',
-      'user-read-email', 
       'user-read-playback-state',
       'user-modify-playback-state',
       'streaming',
-      'playlist-modify-private',
       'user-library-modify'
     ],
     
