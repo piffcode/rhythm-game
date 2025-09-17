@@ -1,19 +1,19 @@
 // Environment Configuration for Spotify Rhythm Game
-// Change YOUR_HOST_HERE to your actual production domain
+// Updated for Vercel deployment
 
 const CONFIG = (() => {
   const currentHost = window.location.origin;
   const isLocal = currentHost.includes('localhost') || currentHost.includes('127.0.0.1');
   
-  // Replace YOUR_HOST_HERE with your actual domain (e.g., 'https://myrhythmgame.com')
-  const PROD_HOST = 'https://YOUR_HOST_HERE';
+  // Production host - your Vercel domain
+  const PROD_HOST = 'https://rhythm-game-4v406xt16-rhythm-games-projects.vercel.app';
   
   const config = {
     IS_LOCAL: isLocal,
     HOST: isLocal ? currentHost : PROD_HOST,
     
     // Spotify App Credentials
-    CLIENT_ID: 'your_spotify_client_id_here', // Replace with your actual Client ID
+    CLIENT_ID: '314f6b8f332041dcb5f678b85acf36ea',
     
     // Scopes required for the game
     SCOPES: [
