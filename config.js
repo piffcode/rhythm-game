@@ -1,9 +1,39 @@
 // config.js - Single source of truth for all configuration
 
+const resolveRedirectUri = () => {
+    // Allow runtime override before falling back to derived values
+    if (typeof window !== 'undefined') {
+        const override = window.__RHYTHM_REDIRECT_URI;
+        if (typeof override === 'string' && override.trim().length > 0) {
+            return override.trim();
+        }
+
+        try {
+            const baseUrl = new URL(window.location.href);
+
+            // Replace the last path segment with auth.html while keeping subdirectories intact
+            const pathSegments = baseUrl.pathname.split('/');
+            pathSegments[pathSegments.length - 1] = 'auth.html';
+            baseUrl.pathname = pathSegments.join('/');
+            baseUrl.search = '';
+            baseUrl.hash = '';
+
+            if (baseUrl.protocol === 'http:' || baseUrl.protocol === 'https:') {
+                return baseUrl.toString();
+            }
+        } catch (error) {
+            console.warn('Unable to derive redirect URI from current location, falling back to default:', error);
+        }
+    }
+
+    // Final safety fallback so the value is always usable for local development
+    return 'http://localhost:3000/auth.html';
+};
+
 export const config = {
     // Spotify App Configuration
     CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-    REDIRECT_URI: window.location.origin + '/auth.html',
+    REDIRECT_URI: resolveRedirectUri(),
     
     // Feature Flags
     USE_WORKER: false,
