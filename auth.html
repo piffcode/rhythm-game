@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>RHYTHM - Authentication</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1db954, #191414);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .status-message {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid rgba(255, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .back-link {
+            color: #1db954;
+            text-decoration: none;
+            font-size: 16px;
+            margin-top: 1rem;
+            display: inline-block;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .success {
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid rgba(0, 255, 0, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">RHYTHM</div>
+        <div class="status-message" id="statusMessage">Authenticating with Spotify...</div>
+        <div class="spinner" id="spinner"></div>
+        
+        <div class="error" id="error">
+            <div id="errorMessage"></div>
+            <a href="/" class="back-link">Back to Start</a>
+        </div>
+        
+        <div class="success" id="success" style="display: none;">
+            <div id="successMessage">Authentication successful! Redirecting...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { config } from './config.js';
+        import { PKCE } from './auth/pkce.js';
+
+        // Initialize authentication flow
+        async function handleAuthCallback() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const code = urlParams.get('code');
+                const state = urlParams.get('state');
+                const error = urlParams.get('error');
+                const country = urlParams.get('country') || sessionStorage.getItem('country');
+                
+                // Handle authorization errors
+                if (error) {
+                    let errorMessage = 'Authorization failed';
+                    switch (error) {
+                        case 'access_denied':
+                            errorMessage = 'Access was denied. Please authorize the application to continue.';
+                            break;
+                        case 'invalid_request':
+                            errorMessage = 'Invalid authorization request.';
+                            break;
+                        case 'invalid_client':
+                            errorMessage = 'Invalid client configuration.';
+                            break;
+                        case 'invalid_scope':
+                            errorMessage = 'Invalid permissions requested.';
+                            break;
+                        case 'server_error':
+                            errorMessage = 'Spotify server error. Please try again.';
+                            break;
+                        case 'temporarily_unavailable':
+                            errorMessage = 'Spotify service temporarily unavailable. Please try again later.';
+                            break;
+                        default:
+                            errorMessage = `Authorization error: ${error}`;
+                    }
+                    throw new Error(errorMessage);
+                }
+                
+                if (!code) {
+                    throw new Error('No authorization code received from Spotify');
+                }
+                
+                // Update status
+                updateStatus('Exchanging authorization code...');
+                
+                // Initialize PKCE and exchange code for token
+                const auth = new PKCE(config.CLIENT_ID, config.REDIRECT_URI);
+                const tokenData = await auth.exchangeCodeForToken(code, state);
+                
+                // Update status
+                updateStatus('Authentication successful!');
+                showSuccess('Authentication completed successfully! Redirecting to game...');
+                
+                // Generate bootstrap nonce and redirect to game
+                const bootstrapNonce = generateUUID();
+                sessionStorage.setItem('bootstrap_nonce', bootstrapNonce);
+                
+                // Build game URL with parameters
+                const gameUrl = new URL('./rhythm.html', window.location.origin);
+                gameUrl.searchParams.set('bootstrap', bootstrapNonce);
+                if (country) {
+                    gameUrl.searchParams.set('country', country);
+                }
+                
+                // Small delay for user feedback, then redirect
+                setTimeout(() => {
+                    window.location.href = gameUrl.toString();
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Authentication error:', error);
+                showError(error.message);
+            }
+        }
+
+        function updateStatus(message) {
+            const statusElement = document.getElementById('statusMessage');
+            if (statusElement) {
+                statusElement.textContent = message;
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('statusMessage').style.display = 'none';
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+
+        function showSuccess(message) {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('successMessage').textContent = message;
+            document.getElementById('success').style.display = 'block';
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Check if we're in an authentication callback
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('code') || urlParams.has('error')) {
+            // This is a callback from Spotify
+            handleAuthCallback();
+        } else {
+            // This page was accessed directly, redirect to home
+            showError('Invalid access. Please start from the main page.');
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

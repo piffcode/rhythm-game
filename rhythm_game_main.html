@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>RHYTHM</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1db954, #191414);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none;
+        }
+        
+        /* Defensive CSS to hide any stray media elements */
+        audio, video, iframe, object, embed {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 3rem;
+            opacity: 0.9;
+        }
+        
+        .btn {
+            background: #1db954;
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            max-width: 200px;
+            box-shadow: 0 4px 20px rgba(29, 185, 84, 0.3);
+        }
+        
+        .btn:hover {
+            background: #1ed760;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(29, 185, 84, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .loading {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid rgba(255, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+        
+        .input-shield {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            touch-action: none;
+        }
+        
+        .hud {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 100;
+            color: white;
+            font-size: 16px;
+            pointer-events: none;
+        }
+        
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .hud-bottom {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 10px;
+        }
+        
+        .score {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .combo {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .health-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 100%;
+        }
+        
+        .track-info {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .track-name {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .track-artist {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .required-threshold {
+            font-size: 12px;
+            color: #1db954;
+            margin-top: 5px;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            z-index: 1001;
+            animation: fadeInOut 3s ease-in-out;
+        }
+        
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        
+        .results-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1db954, #191414);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            z-index: 2000;
+        }
+        
+        .results-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        .results-stats {
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 2rem;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .track-result {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .track-result:last-child {
+            border-bottom: none;
+        }
+        
+        .track-result-name {
+            font-weight: bold;
+            font-size: 14px;
+            flex: 1;
+            text-align: left;
+        }
+        
+        .track-result-score {
+            font-size: 12px;
+            text-align: right;
+            margin-left: 10px;
+        }
+        
+        .completion-code {
+            background: rgba(29, 185, 84, 0.2);
+            border: 1px solid rgba(29, 185, 84, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 2rem;
+            text-align: center;
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+        }
+        
+        .back-link {
+            color: #1db954;
+            text-decoration: none;
+            font-size: 16px;
+            margin-top: 1rem;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <!-- Landing Page (index.html content) -->
+    <div id="landing" class="container">
+        <div class="logo">RHYTHM</div>
+        <div class="subtitle">Spotify Rhythm Game</div>
+        <button class="btn" onclick="startAuth()">START</button>
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div style="margin-top: 10px;">Loading...</div>
+        </div>
+        <div class="error" id="error">
+            <div id="errorMessage"></div>
+        </div>
+    </div>
+
+    <!-- Game Canvas (hidden initially) -->
+    <div class="canvas-container" style="display: none;" id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Game HUD -->
+        <div class="hud">
+            <div class="hud-top">
+                <div class="score" id="scoreDisplay">0</div>
+                <div class="combo" id="comboDisplay">0x</div>
+            </div>
+            <div class="track-info">
+                <div class="track-name" id="trackName">Loading...</div>
+                <div class="track-artist" id="trackArtist"></div>
+                <div class="required-threshold" id="requiredThreshold"></div>
+            </div>
+            <div class="health-bar">
+                <div class="health-fill" id="healthFill"></div>
+            </div>
+        </div>
+        
+        <!-- Input Shield (shown during loading) -->
+        <div class="input-shield" id="inputShield">
+            <div class="container">
+                <div class="spinner"></div>
+                <div style="margin-top: 20px;" id="shieldMessage">Preparing game...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Screen -->
+    <div class="results-screen" id="resultsScreen">
+        <div class="results-title">Session Complete</div>
+        <div class="results-stats" id="resultsStats">
+            <!-- Track results will be populated here -->
+        </div>
+        <div class="completion-code">
+            <div style="margin-bottom: 8px; font-weight: bold;">Completion Code:</div>
+            <div id="completionCode">RHYTHM-20241217-A1B2C3D4</div>
+        </div>
+        <a href="/" class="back-link">Play Again</a>
+    </div>
+
+    <script type="module">
+        import { config } from './config.js';
+        import { PKCE } from './auth/pkce.js';
+        import { SpotifyClient } from './spotify/client.js';
+        import { SpotifyPlayback } from './spotify/playback.js';
+        import { GameEngine } from './game/engine.js';
+        import { GameInput } from './game/input.js';
+        import { GameRender } from './game/render.js';
+        import { GameUI } from './game/ui.js';
+        import { ChartGenerator } from './game/chart.js';
+
+        // Global app state
+        let app = {
+            auth: null,
+            client: null,
+            playback: null,
+            engine: null,
+            input: null,
+            render: null,
+            ui: null,
+            currentPage: 'landing'
+        };
+
+        // Initialize based on current page context
+        function init() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const isAuthCallback = window.location.pathname.includes('auth.html') && urlParams.has('code');
+            const isGamePage = window.location.pathname.includes('rhythm.html');
+            
+            if (isAuthCallback) {
+                handleAuthCallback();
+            } else if (isGamePage) {
+                initGamePage();
+            } else {
+                initLandingPage();
+            }
+        }
+
+        function initLandingPage() {
+            app.currentPage = 'landing';
+            // Preserve country parameter if present
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('country')) {
+                sessionStorage.setItem('country', urlParams.get('country'));
+            }
+        }
+
+        async function startAuth() {
+            try {
+                showLoading(true);
+                
+                app.auth = new PKCE(config.CLIENT_ID, config.REDIRECT_URI);
+                const authUrl = await app.auth.generateAuthUrl(config.SCOPES);
+                
+                // Preserve country parameter
+                const country = sessionStorage.getItem('country') || new URLSearchParams(window.location.search).get('country');
+                if (country) {
+                    const url = new URL(authUrl);
+                    url.searchParams.set('country', country);
+                    window.location.href = url.toString();
+                } else {
+                    window.location.href = authUrl;
+                }
+            } catch (error) {
+                console.error('Auth error:', error);
+                showError('Authentication failed. Please try again.');
+                showLoading(false);
+            }
+        }
+
+        async function handleAuthCallback() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const code = urlParams.get('code');
+                const state = urlParams.get('state');
+                const country = urlParams.get('country') || sessionStorage.getItem('country');
+                
+                if (!code) {
+                    throw new Error('Authorization code not found');
+                }
+                
+                // Initialize PKCE from stored values
+                app.auth = new PKCE(config.CLIENT_ID, config.REDIRECT_URI);
+                await app.auth.exchangeCodeForToken(code, state);
+                
+                // Generate bootstrap nonce and redirect to game
+                const bootstrapNonce = generateUUID();
+                sessionStorage.setItem('bootstrap_nonce', bootstrapNonce);
+                
+                const gameUrl = `rhythm.html?bootstrap=${bootstrapNonce}${country ? `&country=${country}` : ''}`;
+                window.location.href = gameUrl;
+                
+            } catch (error) {
+                console.error('Auth callback error:', error);
+                document.body.innerHTML = `
+                    <div class="container">
+                        <div class="error" style="display: block;">
+                            <div>Authentication failed: ${error.message}</div>
+                            <a href="/" class="back-link">Back to Start</a>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function initGamePage() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const bootstrap = urlParams.get('bootstrap');
+                const storedNonce = sessionStorage.getItem('bootstrap_nonce');
+                
+                // Validate bootstrap nonce
+                if (!bootstrap || bootstrap !== storedNonce) {
+                    throw new Error('Invalid session. Please start over.');
+                }
+                
+                // Clear the nonce after use
+                sessionStorage.removeItem('bootstrap_nonce');
+                
+                // Hide landing, show game
+                document.getElementById('landing').style.display = 'none';
+                document.getElementById('gameContainer').style.display = 'block';
+                
+                // Initialize Spotify client
+                app.client = new SpotifyClient();
+                await app.client.initialize();
+                
+                // Check premium status
+                await checkPremiumStatus();
+                
+                // Initialize playback
+                app.playback = new SpotifyPlayback(app.client);
+                await app.playback.initialize();
+                
+                // Wait for device
+                await waitForDevice();
+                
+                // Initialize game components
+                const canvas = document.getElementById('gameCanvas');
+                app.engine = new GameEngine();
+                app.input = new GameInput(canvas);
+                app.render = new GameRender(canvas);
+                app.ui = new GameUI();
+                
+                // Start session
+                await startGameSession();
+                
+            } catch (error) {
+                console.error('Game init error:', error);
+                showGameError(error.message);
+            }
+        }
+
+        async function checkPremiumStatus() {
+            try {
+                await app.client.request('/v1/me/player/devices');
+            } catch (error) {
+                if (error.status === 403) {
+                    showGameError('Spotify Premium required to play.');
+                    throw error;
+                }
+                // Other errors might be temporary, continue
+            }
+        }
+
+        async function waitForDevice() {
+            const maxAttempts = 40; // 120 seconds
+            let attempts = 0;
+            
+            updateShieldMessage('Open Spotify app, start any song, return here and press Start.');
+            
+            while (attempts < maxAttempts) {
+                try {
+                    const devices = await app.client.request('/v1/me/player/devices');
+                    if (devices.devices && devices.devices.some(d => d.is_active)) {
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('Device check failed:', error);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                attempts++;
+            }
+            
+            throw new Error('No active device found. Open Spotify, start any song, return here, then press Start.');
+        }
+
+        async function startGameSession() {
+            updateShieldMessage('Starting session...');
+            
+            // Get user profile for country and user ID
+            const profile = await app.client.request('/v1/me');
+            const country = new URLSearchParams(window.location.search).get('country') || 
+                           sessionStorage.getItem('country') || 
+                           profile.country || 'US';
+            
+            // Create playlists
+            const playlistNames = generatePlaylistNames(country);
+            const publicPlaylist = await createPlaylist(profile.id, playlistNames.public, true);
+            const privatePlaylist = await createPlaylist(profile.id, playlistNames.private, false);
+            
+            // Generate track list
+            const tracks = await generateTrackList(country);
+            
+            // Add tracks to playlists
+            await addTracksToPlaylist(publicPlaylist.id, tracks);
+            await addTracksToPlaylist(privatePlaylist.id, tracks);
+            
+            // Start playback
+            await app.playback.startPlayback(publicPlaylist.uri, 0);
+            
+            // Initialize game with tracks
+            app.engine.initializeSession(tracks, profile.id, generateUUID());
+            
+            // Hide input shield
+            document.getElementById('inputShield').style.display = 'none';
+            
+            // Start game loop
+            startGameLoop();
+        }
+
+        function startGameLoop() {
+            let lastTime = performance.now();
+            
+            function gameLoop(currentTime) {
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+                
+                // Update game state
+                app.engine.update(deltaTime, app.playback.getPositionMs());
+                
+                // Handle input
+                app.input.update();
+                
+                // Render frame
+                app.render.render(app.engine.getGameState());
+                
+                // Update UI
+                app.ui.update(app.engine.getGameState());
+                
+                // Continue loop
+                requestAnimationFrame(gameLoop);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Utility functions
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function generatePlaylistNames(country) {
+            const adjectives = ['Neon', 'Cosmic', 'Electric', 'Sonic', 'Digital', 'Vibrant', 'Mystic', 'Stellar', 'Dynamic', 'Radiant'];
+            const nouns = ['Beats', 'Pulse', 'Groove', 'Flow', 'Wave', 'Storm', 'Rush', 'Blaze', 'Spark', 'Echo'];
+            const nonce = Math.random().toString(36).substring(2, 6).toUpperCase();
+            
+            const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+            const noun = nouns[Math.floor(Math.random() * nouns.length)];
+            
+            return {
+                public: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`,
+                private: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`
+            };
+        }
+
+        async function createPlaylist(userId, name, isPublic) {
+            return await app.client.request(`/v1/users/${userId}/playlists`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: name,
+                    description: `Generated by RHYTHM rhythm game - ${new Date().toISOString()}`,
+                    public: isPublic
+                })
+            });
+        }
+
+        async function generateTrackList(country) {
+            const lockedTracks = config.LOCKED_TRACK_IDS;
+            
+            // Get audio features for locked tracks to seed recommendations
+            const features = await app.client.request(`/v1/audio-features?ids=${lockedTracks.join(',')}`);
+            
+            try {
+                // Try to get recommendation based on audio features
+                const seedFeatures = features.audio_features.filter(f => f); // Remove nulls
+                if (seedFeatures.length > 0) {
+                    const avgFeatures = {
+                        target_energy: seedFeatures.reduce((sum, f) => sum + f.energy, 0) / seedFeatures.length,
+                        target_danceability: seedFeatures.reduce((sum, f) => sum + f.danceability, 0) / seedFeatures.length,
+                        target_valence: seedFeatures.reduce((sum, f) => sum + f.valence, 0) / seedFeatures.length
+                    };
+                    
+                    const recommendations = await app.client.request(
+                        `/v1/recommendations?seed_tracks=${lockedTracks[0]}&market=${country}&limit=1&` +
+                        `target_energy=${avgFeatures.target_energy}&target_danceability=${avgFeatures.target_danceability}`
+                    );
+                    
+                    if (recommendations.tracks && recommendations.tracks.length > 0) {
+                        return [
+                            ...lockedTracks,
+                            recommendations.tracks[0].id
+                        ];
+                    }
+                }
+            } catch (error) {
+                console.warn('Recommendations failed, using fallback:', error);
+            }
+            
+            // Fallback: use genre-based recommendation
+            try {
+                const fallbackRec = await app.client.request(
+                    `/v1/recommendations?seed_genres=pop,dance,electronic&market=${country}&limit=1`
+                );
+                
+                if (fallbackRec.tracks && fallbackRec.tracks.length > 0) {
+                    return [
+                        ...lockedTracks,
+                        fallbackRec.tracks[0].id
+                    ];
+                }
+            } catch (error) {
+                console.warn('Fallback recommendations failed:', error);
+            }
+            
+            // Ultimate fallback: just use locked tracks twice
+            return [...lockedTracks, lockedTracks[0]];
+        }
+
+        async function addTracksToPlaylist(playlistId, trackIds) {
+            const uris = trackIds.map(id => `spotify:track:${id}`);
+            await app.client.request(`/v1/playlists/${playlistId}/tracks`, {
+                method: 'POST',
+                body: JSON.stringify({ uris })
+            });
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+
+        function showGameError(message) {
+            document.getElementById('inputShield').style.display = 'flex';
+            document.getElementById('shieldMessage').innerHTML = `
+                <div style="color: #ff4444; margin-bottom: 20px;">${message}</div>
+                <a href="/" class="back-link">Back to Start</a>
+            `;
+        }
+
+        function updateShieldMessage(message) {
+            document.getElementById('shieldMessage').textContent = message;
+        }
+
+        // Make functions globally available
+        window.startAuth = startAuth;
+
+        // Initialize app
+        init();
+    </script>
+</body>
+</html>

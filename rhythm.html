@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>RHYTHM - Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none;
+        }
+        
+        /* Defensive CSS to hide any stray media elements */
+        audio, video, iframe, object, embed {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        
+        .canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+        
+        .input-shield {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            touch-action: none;
+        }
+        
+        .shield-content {
+            text-align: center;
+            padding: 20px;
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hud {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 100;
+            color: white;
+            font-size: 16px;
+            pointer-events: none;
+        }
+        
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .score {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .combo {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .track-info {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .track-name {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .track-artist {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .required-threshold {
+            font-size: 12px;
+            color: #1db954;
+            margin-top: 5px;
+        }
+        
+        .health-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 100%;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            z-index: 1001;
+            animation: fadeInOut 3s ease-in-out;
+        }
+        
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        
+        .results-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1db954, #191414);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            z-index: 2000;
+        }
+        
+        .results-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        .results-stats {
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 2rem;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .track-result {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .track-result:last-child {
+            border-bottom: none;
+        }
+        
+        .track-result-name {
+            font-weight: bold;
+            font-size: 14px;
+            flex: 1;
+            text-align: left;
+        }
+        
+        .track-result-score {
+            font-size: 12px;
+            text-align: right;
+            margin-left: 10px;
+        }
+        
+        .completion-code {
+            background: rgba(29, 185, 84, 0.2);
+            border: 1px solid rgba(29, 185, 84, 0.5);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 2rem;
+            text-align: center;
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+        }
+        
+        .back-link {
+            color: #1db954;
+            text-decoration: none;
+            font-size: 16px;
+            margin-top: 1rem;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .error-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #ff4444, #191414);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            z-index: 3000;
+            text-align: center;
+        }
+        
+        .error-title {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        
+        .error-message {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Game Canvas -->
+    <div class="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Game HUD -->
+        <div class="hud">
+            <div class="hud-top">
+                <div class="score" id="scoreDisplay">0</div>
+                <div class="combo" id="comboDisplay">0x</div>
+            </div>
+            <div class="track-info">
+                <div class="track-name" id="trackName">Loading...</div>
+                <div class="track-artist" id="trackArtist"></div>
+                <div class="required-threshold" id="requiredThreshold"></div>
+            </div>
+            <div class="health-bar">
+                <div class="health-fill" id="healthFill"></div>
+            </div>
+        </div>
+        
+        <!-- Input Shield (shown during loading) -->
+        <div class="input-shield" id="inputShield">
+            <div class="shield-content">
+                <div class="spinner"></div>
+                <div style="margin-top: 20px;" id="shieldMessage">Initializing game...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Screen -->
+    <div class="results-screen" id="resultsScreen">
+        <div class="results-title">Session Complete</div>
+        <div class="results-stats" id="resultsStats">
+            <!-- Track results will be populated here -->
+        </div>
+        <div class="completion-code">
+            <div style="margin-bottom: 8px; font-weight: bold;">Completion Code:</div>
+            <div id="completionCode">RHYTHM-20241217-A1B2C3D4</div>
+        </div>
+        <a href="/" class="back-link">Play Again</a>
+    </div>
+
+    <!-- Error Screen -->
+    <div class="error-screen" id="errorScreen">
+        <div class="error-title">Error</div>
+        <div class="error-message" id="errorMessage">Something went wrong</div>
+        <a href="/" class="back-link">Back to Start</a>
+    </div>
+
+    <script type="module">
+        import { config } from './config.js';
+        import { PKCE } from './auth/pkce.js';
+        import { SpotifyClient } from './spotify/client.js';
+        import { SpotifyPlayback } from './spotify/playback.js';
+        import { GameEngine } from './game/engine.js';
+        import { GameInput } from './game/input.js';
+        import { GameRender } from './game/render.js';
+        import { GameUI } from './game/ui.js';
+
+        // Global app state
+        let app = {
+            auth: null,
+            client: null,
+            playback: null,
+            engine: null,
+            input: null,
+            render: null,
+            ui: null,
+            isInitialized: false,
+            gameLoopId: null
+        };
+
+        // Initialize the game
+        async function initGame() {
+            try {
+                // Validate bootstrap nonce
+                const urlParams = new URLSearchParams(window.location.search);
+                const bootstrap = urlParams.get('bootstrap');
+                const storedNonce = sessionStorage.getItem('bootstrap_nonce');
+                
+                if (!bootstrap || bootstrap !== storedNonce) {
+                    throw new Error('Invalid session. Please start over.');
+                }
+                
+                sessionStorage.removeItem('bootstrap_nonce');
+                
+                updateShieldMessage('Connecting to Spotify...');
+                
+                // Initialize Spotify client
+                app.client = new SpotifyClient();
+                await app.client.initialize();
+                
+                updateShieldMessage('Checking Premium status...');
+                await checkPremiumStatus();
+                
+                updateShieldMessage('Setting up playback...');
+                app.playback = new SpotifyPlayback(app.client);
+                await app.playback.initialize();
+                
+                updateShieldMessage('Looking for devices...');
+                await waitForDevice();
+                
+                updateShieldMessage('Initializing game...');
+                
+                // Initialize game components
+                const canvas = document.getElementById('gameCanvas');
+                app.engine = new GameEngine();
+                app.input = new GameInput(canvas);
+                app.render = new GameRender(canvas);
+                app.ui = new GameUI();
+                
+                // Setup event handlers
+                setupEventHandlers();
+                
+                updateShieldMessage('Starting session...');
+                await startGameSession();
+                
+                // Hide input shield and start game
+                document.getElementById('inputShield').style.display = 'none';
+                app.isInitialized = true;
+                
+                startGameLoop();
+                
+            } catch (error) {
+                console.error('Game initialization failed:', error);
+                showError(error.message);
+            }
+        }
+
+        function setupEventHandlers() {
+            // Input to engine connection
+            app.input.onLaneHit = (lane, time) => {
+                const result = app.engine.handleLaneHit(lane, time);
+                if (result) {
+                    app.render.addHitEffect(lane, result.hitType, result.score);
+                    if (result.combo > 10) {
+                        app.render.addComboPopup(result.combo, result.score);
+                    }
+                }
+            };
+            
+            // Engine event handlers
+            app.engine.onTrackStart = (track, requiredPercent) => {
+                console.log(`Track started: ${track.name} (${requiredPercent}% required)`);
+            };
+            
+            app.engine.onTrackEnd = (result) => {
+                app.ui.showTrackComplete(result);
+            };
+            
+            app.engine.onSessionComplete = (result) => {
+                app.ui.showResults(result);
+                stopGameLoop();
+            };
+            
+            // Playback event handlers
+            app.playback.onTrackChange = async (track) => {
+                // Get audio analysis for new track
+                try {
+                    const analysis = await app.client.getAudioAnalysis(track.id);
+                    await app.engine.startTrack(track, analysis);
+                } catch (error) {
+                    console.error('Failed to get audio analysis:', error);
+                }
+            };
+            
+            // Enable input after initialization
+            app.input.enable();
+        }
+
+        async function checkPremiumStatus() {
+            try {
+                await app.client.request('/v1/me/player/devices');
+            } catch (error) {
+                if (error.status === 403) {
+                    throw new Error(config.ERRORS.NO_PREMIUM);
+                }
+            }
+        }
+
+        async function waitForDevice() {
+            const maxAttempts = config.DEVICE_POLLING.MAX_ATTEMPTS;
+            let attempts = 0;
+            
+            updateShieldMessage('Open Spotify app, start any song, return here and press Start.');
+            
+            while (attempts < maxAttempts) {
+                try {
+                    const devices = await app.client.request('/v1/me/player/devices');
+                    if (devices.devices && devices.devices.some(d => d.is_active)) {
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('Device check failed:', error);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, config.DEVICE_POLLING.INTERVAL));
+                attempts++;
+                
+                // Update message periodically
+                if (attempts % 5 === 0) {
+                    updateShieldMessage(`Waiting for device... (${Math.floor(attempts * 3)}s)`);
+                }
+            }
+            
+            throw new Error(config.ERRORS.NO_DEVICE);
+        }
+
+        async function startGameSession() {
+            // Get user profile
+            const profile = await app.client.request('/v1/me');
+            const country = new URLSearchParams(window.location.search).get('country') || 
+                           sessionStorage.getItem('country') || 
+                           profile.country || 'US';
+            
+            // Generate track list
+            const tracks = await generateTrackList(country);
+            
+            // Create playlists
+            const playlistNames = generatePlaylistNames(country);
+            const publicPlaylist = await createPlaylist(profile.id, playlistNames.public, true);
+            const privatePlaylist = await createPlaylist(profile.id, playlistNames.private, false);
+            
+            // Add tracks to playlists
+            const trackUris = tracks.map(id => `spotify:track:${id}`);
+            await addTracksToPlaylist(publicPlaylist.id, trackUris);
+            await addTracksToPlaylist(privatePlaylist.id, trackUris);
+            
+            // Initialize game session
+            app.engine.initializeSession(tracks, profile.id, generateUUID());
+            
+            // Start playback
+            await app.playback.startPlayback(publicPlaylist.uri, 0);
+            app.playback.lockControls(publicPlaylist.uri, tracks);
+        }
+
+        function startGameLoop() {
+            let lastTime = performance.now();
+            
+            function gameLoop(currentTime) {
+                if (!app.isInitialized) return;
+                
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+                
+                // Update game components
+                app.engine.update(deltaTime, app.playback.getPositionMs());
+                app.input.update();
+                app.ui.update(app.engine.getGameState());
+                
+                // Render frame
+                app.render.render(app.engine.getGameState());
+                
+                // Continue loop
+                app.gameLoopId = requestAnimationFrame(gameLoop);
+            }
+            
+            app.gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function stopGameLoop() {
+            if (app.gameLoopId) {
+                cancelAnimationFrame(app.gameLoopId);
+                app.gameLoopId = null;
+            }
+        }
+
+        async function generateTrackList(country) {
+            const lockedTracks = config.LOCKED_TRACK_IDS;
+            
+            try {
+                // Get audio features for seeding
+                const features = await app.client.getAudioFeatures(lockedTracks);
+                const validFeatures = features.audio_features.filter(f => f);
+                
+                if (validFeatures.length > 0) {
+                    const avgEnergy = validFeatures.reduce((sum, f) => sum + f.energy, 0) / validFeatures.length;
+                    const avgDanceability = validFeatures.reduce((sum, f) => sum + f.danceability, 0) / validFeatures.length;
+                    
+                    const recommendations = await app.client.getRecommendations({
+                        seed_tracks: lockedTracks[0],
+                        market: country,
+                        limit: 1,
+                        target_energy: avgEnergy,
+                        target_danceability: avgDanceability
+                    });
+                    
+                    if (recommendations.tracks && recommendations.tracks.length > 0) {
+                        return [...lockedTracks, recommendations.tracks[0].id];
+                    }
+                }
+            } catch (error) {
+                console.warn('Recommendations failed, using fallback:', error);
+            }
+            
+            // Fallback
+            try {
+                const fallback = await app.client.getRecommendations({
+                    seed_genres: 'pop,dance,electronic',
+                    market: country,
+                    limit: 1
+                });
+                
+                if (fallback.tracks && fallback.tracks.length > 0) {
+                    return [...lockedTracks, fallback.tracks[0].id];
+                }
+            } catch (error) {
+                console.warn('Fallback failed:', error);
+            }
+            
+            // Ultimate fallback
+            return [...lockedTracks, lockedTracks[0]];
+        }
+
+        function generatePlaylistNames(country) {
+            const adjectives = config.PLAYLIST.ADJECTIVES;
+            const nouns = config.PLAYLIST.NOUNS;
+            const nonce = Math.random().toString(36).substring(2, 6).toUpperCase();
+            
+            const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+            const noun = nouns[Math.floor(Math.random() * nouns.length)];
+            
+            return {
+                public: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`,
+                private: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`
+            };
+        }
+
+        async function createPlaylist(userId, name, isPublic) {
+            return await app.client.createPlaylist(userId, {
+                name: name,
+                description: `${config.PLAYLIST.DESCRIPTION_TEMPLATE} - ${new Date().toISOString()}`,
+                public: isPublic
+            });
+        }
+
+        async function addTracksToPlaylist(playlistId, uris) {
+            await app.client.addTracksToPlaylist(playlistId, uris);
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function updateShieldMessage(message) {
+            const element = document.getElementById('shieldMessage');
+            if (element) {
+                element.textContent = message;
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorScreen').style.display = 'flex';
+        }
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && app.isInitialized) {
+                // Page is hidden, pause if possible
+                console.log('Page hidden');
+            } else if (!document.hidden && app.isInitialized) {
+                // Page is visible again
+                console.log('Page visible');
+            }
+        });
+
+        // Handle beforeunload
+        window.addEventListener('beforeunload', () => {
+            if (app.playback) {
+                app.playback.unlockControls();
+            }
+            stopGameLoop();
+        });
+
+        // Initialize the game when page loads
+        initGame();
+    </script>
+</body>
+</html>
