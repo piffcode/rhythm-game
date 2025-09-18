@@ -84,6 +84,23 @@
             100% { transform: rotate(360deg); }
         }
         
+        .progress-bar {
+            width: 200px;
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            margin: 10px auto;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #1db954;
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
         .hud {
             position: fixed;
             top: 20px;
@@ -305,6 +322,9 @@
             <div class="shield-content">
                 <div class="spinner"></div>
                 <div style="margin-top: 20px;" id="shieldMessage">Initializing game...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -353,9 +373,28 @@
             gameLoopId: null
         };
 
+        // Progress tracking
+        let initProgress = 0;
+        const initSteps = 8; // Total number of initialization steps
+
+        // Update progress display
+        function updateProgress(step, message) {
+            initProgress = step;
+            const percentage = Math.round((step / initSteps) * 100);
+            
+            updateShieldMessage(message);
+            
+            const progressFill = document.getElementById('progressFill');
+            if (progressFill) {
+                progressFill.style.width = `${percentage}%`;
+            }
+        }
+
         // Initialize the game
         async function initGame() {
             try {
+                updateProgress(0, 'Validating session...');
+                
                 // Validate bootstrap nonce
                 const urlParams = new URLSearchParams(window.location.search);
                 const bootstrap = urlParams.get('bootstrap');
@@ -367,36 +406,73 @@
                 
                 sessionStorage.removeItem('bootstrap_nonce');
                 
-                updateShieldMessage('Connecting to Spotify...');
+                updateProgress(1, 'Connecting to Spotify...');
                 
-                // Initialize Spotify client
+                // Initialize Spotify client with timeout
                 app.client = new SpotifyClient();
-                await app.client.initialize();
+                await Promise.race([
+                    app.client.initialize(),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Spotify connection timeout')), 10000)
+                    )
+                ]);
                 
-                updateShieldMessage('Checking Premium status...');
+                updateProgress(2, 'Checking Premium status...');
                 await checkPremiumStatus();
                 
-                updateShieldMessage('Setting up playback...');
+                updateProgress(3, 'Setting up playback...');
                 app.playback = new SpotifyPlayback(app.client);
-                await app.playback.initialize();
                 
-                updateShieldMessage('Looking for devices...');
+                // Use a shorter timeout for playback initialization
+                await Promise.race([
+                    app.playback.initialize(),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Playback setup timeout')), 15000)
+                    )
+                ]);
+                
+                updateProgress(4, 'Looking for devices...');
                 await waitForDevice();
                 
-                updateShieldMessage('Initializing game...');
+                updateProgress(5, 'Initializing game components...');
                 
-                // Initialize game components
+                // Initialize game components in parallel where possible
                 const canvas = document.getElementById('gameCanvas');
-                app.engine = new GameEngine();
-                app.input = new GameInput(canvas);
-                app.render = new GameRender(canvas);
-                app.ui = new GameUI();
                 
-                // Setup event handlers
+                // These can be created in parallel
+                await Promise.all([
+                    // Game engine
+                    new Promise(resolve => {
+                        app.engine = new GameEngine();
+                        resolve();
+                    }),
+                    // Input handler
+                    new Promise(resolve => {
+                        app.input = new GameInput(canvas);
+                        resolve();
+                    }),
+                    // Renderer
+                    new Promise(resolve => {
+                        app.render = new GameRender(canvas);
+                        resolve();
+                    }),
+                    // UI handler
+                    new Promise(resolve => {
+                        app.ui = new GameUI();
+                        resolve();
+                    })
+                ]);
+                
+                updateProgress(6, 'Setting up event handlers...');
                 setupEventHandlers();
                 
-                updateShieldMessage('Starting session...');
+                updateProgress(7, 'Preparing game session...');
                 await startGameSession();
+                
+                updateProgress(8, 'Ready!');
+                
+                // Small delay to show completion
+                await new Promise(resolve => setTimeout(resolve, 500));
                 
                 // Hide input shield and start game
                 document.getElementById('inputShield').style.display = 'none';
@@ -406,7 +482,7 @@
                 
             } catch (error) {
                 console.error('Game initialization failed:', error);
-                showError(error.message);
+                showError(error.message || 'Failed to initialize game');
             }
         }
 
@@ -438,12 +514,21 @@
             
             // Playback event handlers
             app.playback.onTrackChange = async (track) => {
-                // Get audio analysis for new track
                 try {
-                    const analysis = await app.client.getAudioAnalysis(track.id);
+                    // Use a timeout for audio analysis to prevent hanging
+                    const analysis = await Promise.race([
+                        app.client.getAudioAnalysis(track.id),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Audio analysis timeout')), 10000)
+                        )
+                    ]);
                     await app.engine.startTrack(track, analysis);
                 } catch (error) {
                     console.error('Failed to get audio analysis:', error);
+                    // Continue with a fallback chart
+                    const chartGenerator = new ChartGenerator();
+                    const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
+                    app.engine.startTrackWithChart(track, fallbackChart);
                 }
             };
             
@@ -453,23 +538,40 @@
 
         async function checkPremiumStatus() {
             try {
-                await app.client.request('/v1/me/player/devices');
+                // Quick timeout for this check
+                await Promise.race([
+                    app.client.request('/v1/me/player/devices'),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Premium check timeout')), 5000)
+                    )
+                ]);
             } catch (error) {
                 if (error.status === 403) {
                     throw new Error(config.ERRORS.NO_PREMIUM);
+                }
+                if (error.message.includes('timeout')) {
+                    // Continue anyway - might just be a slow connection
+                    console.warn('Premium check timed out, continuing...');
                 }
             }
         }
 
         async function waitForDevice() {
-            const maxAttempts = config.DEVICE_POLLING.MAX_ATTEMPTS;
+            const maxAttempts = 20; // Reduced from 40
+            const checkInterval = 2000; // Reduced from 3000
             let attempts = 0;
             
-            updateShieldMessage('Open Spotify app, start any song, return here and press Start.');
+            updateShieldMessage('Open Spotify app, start any song, return here.');
             
             while (attempts < maxAttempts) {
                 try {
-                    const devices = await app.client.request('/v1/me/player/devices');
+                    const devices = await Promise.race([
+                        app.client.request('/v1/me/player/devices'),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Device check timeout')), 3000)
+                        )
+                    ]);
+                    
                     if (devices.devices && devices.devices.some(d => d.is_active)) {
                         return;
                     }
@@ -477,12 +579,12 @@
                     console.warn('Device check failed:', error);
                 }
                 
-                await new Promise(resolve => setTimeout(resolve, config.DEVICE_POLLING.INTERVAL));
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
                 attempts++;
                 
-                // Update message periodically
-                if (attempts % 5 === 0) {
-                    updateShieldMessage(`Waiting for device... (${Math.floor(attempts * 3)}s)`);
+                // Update message every few attempts
+                if (attempts % 3 === 0) {
+                    updateShieldMessage(`Waiting for device... (${Math.floor(attempts * 2)}s)`);
                 }
             }
             
@@ -490,31 +592,69 @@
         }
 
         async function startGameSession() {
-            // Get user profile
-            const profile = await app.client.request('/v1/me');
-            const country = new URLSearchParams(window.location.search).get('country') || 
-                           sessionStorage.getItem('country') || 
-                           profile.country || 'US';
-            
-            // Generate track list
-            const tracks = await generateTrackList(country);
-            
-            // Create playlists
-            const playlistNames = generatePlaylistNames(country);
-            const publicPlaylist = await createPlaylist(profile.id, playlistNames.public, true);
-            const privatePlaylist = await createPlaylist(profile.id, playlistNames.private, false);
-            
-            // Add tracks to playlists
-            const trackUris = tracks.map(id => `spotify:track:${id}`);
-            await addTracksToPlaylist(publicPlaylist.id, trackUris);
-            await addTracksToPlaylist(privatePlaylist.id, trackUris);
-            
-            // Initialize game session
-            app.engine.initializeSession(tracks, profile.id, generateUUID());
-            
-            // Start playback
-            await app.playback.startPlayback(publicPlaylist.uri, 0);
-            app.playback.lockControls(publicPlaylist.uri, tracks);
+            try {
+                // Get user profile with timeout
+                const profile = await Promise.race([
+                    app.client.request('/v1/me'),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+                    )
+                ]);
+                
+                const country = new URLSearchParams(window.location.search).get('country') || 
+                               sessionStorage.getItem('country') || 
+                               profile.country || 'US';
+                
+                // Generate track list with timeout
+                const tracks = await Promise.race([
+                    generateTrackList(country),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Track generation timeout')), 10000)
+                    )
+                ]);
+                
+                // Create playlists in parallel
+                const playlistNames = generatePlaylistNames(country);
+                const [publicPlaylist, privatePlaylist] = await Promise.all([
+                    createPlaylist(profile.id, playlistNames.public, true).catch(err => {
+                        console.warn('Public playlist creation failed:', err);
+                        return null;
+                    }),
+                    createPlaylist(profile.id, playlistNames.private, false).catch(err => {
+                        console.warn('Private playlist creation failed:', err);
+                        return null;
+                    })
+                ]);
+                
+                // Add tracks to playlists (non-blocking)
+                const trackUris = tracks.map(id => `spotify:track:${id}`);
+                if (publicPlaylist) {
+                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch(err => 
+                        console.warn('Failed to add tracks to public playlist:', err)
+                    );
+                }
+                if (privatePlaylist) {
+                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch(err => 
+                        console.warn('Failed to add tracks to private playlist:', err)
+                    );
+                }
+                
+                // Initialize game session
+                app.engine.initializeSession(tracks, profile.id, generateUUID());
+                
+                // Start playback
+                const playlistToUse = publicPlaylist || privatePlaylist;
+                if (playlistToUse) {
+                    await app.playback.startPlayback(playlistToUse.uri, 0);
+                    app.playback.lockControls(playlistToUse.uri, tracks);
+                } else {
+                    throw new Error('Failed to create any playlists');
+                }
+                
+            } catch (error) {
+                console.error('Failed to start game session:', error);
+                throw new Error('Failed to start game session: ' + error.message);
+            }
         }
 
         function startGameLoop() {
@@ -552,43 +692,23 @@
             const lockedTracks = config.LOCKED_TRACK_IDS;
             
             try {
-                // Get audio features for seeding
-                const features = await app.client.getAudioFeatures(lockedTracks);
-                const validFeatures = features.audio_features.filter(f => f);
-                
-                if (validFeatures.length > 0) {
-                    const avgEnergy = validFeatures.reduce((sum, f) => sum + f.energy, 0) / validFeatures.length;
-                    const avgDanceability = validFeatures.reduce((sum, f) => sum + f.danceability, 0) / validFeatures.length;
-                    
-                    const recommendations = await app.client.getRecommendations({
-                        seed_tracks: lockedTracks[0],
+                // Simplified track generation with timeout
+                const fallback = await Promise.race([
+                    app.client.getRecommendations({
+                        seed_genres: 'pop,dance',
                         market: country,
-                        limit: 1,
-                        target_energy: avgEnergy,
-                        target_danceability: avgDanceability
-                    });
-                    
-                    if (recommendations.tracks && recommendations.tracks.length > 0) {
-                        return [...lockedTracks, recommendations.tracks[0].id];
-                    }
-                }
-            } catch (error) {
-                console.warn('Recommendations failed, using fallback:', error);
-            }
-            
-            // Fallback
-            try {
-                const fallback = await app.client.getRecommendations({
-                    seed_genres: 'pop,dance,electronic',
-                    market: country,
-                    limit: 1
-                });
+                        limit: 1
+                    }),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Recommendations timeout')), 5000)
+                    )
+                ]);
                 
                 if (fallback.tracks && fallback.tracks.length > 0) {
                     return [...lockedTracks, fallback.tracks[0].id];
                 }
             } catch (error) {
-                console.warn('Fallback failed:', error);
+                console.warn('Recommendations failed:', error);
             }
             
             // Ultimate fallback
@@ -596,8 +716,8 @@
         }
 
         function generatePlaylistNames(country) {
-            const adjectives = config.PLAYLIST.ADJECTIVES;
-            const nouns = config.PLAYLIST.NOUNS;
+            const adjectives = ['Epic', 'Ultimate', 'Perfect'];
+            const nouns = ['Rhythm', 'Beat', 'Vibe'];
             const nonce = Math.random().toString(36).substring(2, 6).toUpperCase();
             
             const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
@@ -612,7 +732,7 @@
         async function createPlaylist(userId, name, isPublic) {
             return await app.client.createPlaylist(userId, {
                 name: name,
-                description: `${config.PLAYLIST.DESCRIPTION_TEMPLATE} - ${new Date().toISOString()}`,
+                description: `Rhythm game session - ${new Date().toISOString()}`,
                 public: isPublic
             });
         }
@@ -644,10 +764,8 @@
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && app.isInitialized) {
-                // Page is hidden, pause if possible
                 console.log('Page hidden');
             } else if (!document.hidden && app.isInitialized) {
-                // Page is visible again
                 console.log('Page visible');
             }
         });
