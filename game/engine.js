@@ -245,13 +245,20 @@ export class GameEngine {
             }
         });
         
-        if (bestNote) {
-            const hitResult = this.calculateHitResult(bestTimeDiff);
-            this.processHit(bestNote, hitResult, bestTimeDiff);
-            return hitResult;
+        if (!bestNote) {
+            return null;
         }
-        
-        return null;
+
+        const hitResult = this.calculateHitResult(bestTimeDiff);
+        const hitData = this.processHit(bestNote, hitResult, bestTimeDiff) || {};
+
+        return {
+            hitType: hitResult,
+            score: hitData.scoreGain ?? 0,
+            combo: hitData.combo ?? this.combo,
+            totalScore: hitData.totalScore ?? this.score,
+            timeDiff: bestTimeDiff
+        };
     }
 
     /**
@@ -275,7 +282,7 @@ export class GameEngine {
     processHit(note, hitResult, timeDiff) {
         note.isHit = true;
         this.hitNotes.add(note.id);
-        
+
         // Update statistics
         this.hitStats[hitResult.toLowerCase()]++;
         this.hitStats.total++;
@@ -301,7 +308,7 @@ export class GameEngine {
         
         // Update health
         this.updateHealth(hitResult);
-        
+
         // Trigger callbacks
         if (this.onScoreUpdate) {
             this.onScoreUpdate({
@@ -311,8 +318,14 @@ export class GameEngine {
                 scoreGain
             });
         }
-        
+
         console.log(`Hit ${hitResult}: ${timeDiff}ms, Score: +${scoreGain}, Combo: ${this.combo}`);
+
+        return {
+            scoreGain,
+            combo: this.combo,
+            totalScore: this.score
+        };
     }
 
     /**
