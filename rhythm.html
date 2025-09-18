@@ -556,210 +556,97 @@
             }
         }
 
-        // Replace the waitForDevice function in your rhythm.html with this version
-
-async function waitForDevice() {
-    const maxAttempts = 30;
-    const checkInterval = 3000; // 3 seconds between checks
-    let attempts = 0;
-    let hasShownInstructions = false;
-    
-    while (attempts < maxAttempts) {
-        try {
-            // First check if there are ANY Spotify devices (not necessarily active)
-            const devices = await Promise.race([
-                app.client.request('/v1/me/player/devices'),
-                new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Device check timeout')), 5000)
-                )
-            ]);
+        async function waitForDevice() {
+            const maxAttempts = 30;
+            const checkInterval = 3000; // 3 seconds between checks
+            let attempts = 0;
+            let hasShownInstructions = false;
             
-            if (!devices.devices || devices.devices.length === 0) {
-                // No devices at all - user needs to install Spotify
-                if (!hasShownInstructions) {
-                    updateShieldMessage('No Spotify devices found. Please install the Spotify app on this device or another device.');
-                    hasShownInstructions = true;
-                }
-            } else {
-                // Check if any device is currently active (playing music)
-                const activeDevice = devices.devices.find(d => d.is_active);
-                
-                if (activeDevice) {
-                    // Perfect! User has Spotify open and playing
-                    updateShieldMessage(`Found active device: ${activeDevice.name}. Taking control...`);
+            while (attempts < maxAttempts) {
+                try {
+                    // Check for Spotify devices with timeout
+                    const devices = await Promise.race([
+                        app.client.request('/v1/me/player/devices'),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Device check timeout')), 5000)
+                        )
+                    ]);
                     
-                    // Wait a moment for the takeover to be smooth
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    return activeDevice;
-                } else {
-                    // Devices exist but none are active - give specific instructions
-                    const deviceNames = devices.devices.map(d => d.name).join(', ');
-                    updateShieldMessage(
-                        `Found devices: ${deviceNames}\n\n` +
-                        'Please open Spotify on any device, start playing any song, then return here. ' +
-                        'The rhythm game will take control of playback automatically.'
-                    );
+                    if (!devices.devices || devices.devices.length === 0) {
+                        // No devices at all - user needs to install/open Spotify
+                        if (!hasShownInstructions) {
+                            updateShieldMessage(
+                                'No Spotify devices found.\n\n' +
+                                'Please:\n' +
+                                '1. Open the Spotify app on any device\n' +
+                                '2. Start playing any song\n' +
+                                '3. Return to this tab'
+                            );
+                            hasShownInstructions = true;
+                        }
+                    } else {
+                        // Check if any device is currently active (playing music)
+                        const activeDevice = devices.devices.find(d => d.is_active);
+                        
+                        if (activeDevice) {
+                            // Perfect! User has Spotify open and playing
+                            updateShieldMessage(`Found active device: ${activeDevice.name}. Taking control...`);
+                            
+                            // Store the active device info for later use
+                            app.originalDevice = activeDevice;
+                            
+                            // Wait a moment to show the success message
+                            await new Promise(resolve => setTimeout(resolve, 1500));
+                            return activeDevice;
+                        } else {
+                            // Devices exist but none are active - give specific instructions
+                            const deviceNames = devices.devices.map(d => d.name).join(', ');
+                            const deviceCount = devices.devices.length;
+                            
+                            updateShieldMessage(
+                                `Found ${deviceCount} Spotify device${deviceCount > 1 ? 's' : ''}: ${deviceNames}\n\n` +
+                                'But none are currently playing music.\n\n' +
+                                'Please start playing any song in Spotify, then return here. ' +
+                                'The rhythm game will automatically take control.'
+                            );
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.warn('Device check failed:', error);
+                    
+                    // Show different messages based on the type of error
+                    if (error.status === 403) {
+                        throw new Error(config.ERRORS.NO_PREMIUM);
+                    } else if (!hasShownInstructions) {
+                        updateShieldMessage(
+                            'Checking for Spotify devices...\n\n' +
+                            'Make sure Spotify is open and playing music.'
+                        );
+                    }
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                attempts++;
+                
+                // Update countdown every few attempts to show progress
+                if (attempts % 5 === 0) {
+                    const remainingTime = Math.max(0, (maxAttempts - attempts) * 3);
+                    const currentMessage = document.getElementById('shieldMessage').textContent;
+                    updateShieldMessage(currentMessage + `\n\nTimeout in ${remainingTime} seconds...`);
                 }
             }
             
-        } catch (error) {
-            console.warn('Device check failed:', error);
-            if (attempts === 0) {
-                updateShieldMessage('Checking for Spotify devices...');
-            }
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-        attempts++;
-        
-        // Update countdown every few attempts
-        if (attempts % 3 === 0) {
-            const remainingTime = Math.max(0, (maxAttempts - attempts) * 3);
-            updateShieldMessage(
-                document.getElementById('shieldMessage').textContent + 
-                `\n\nTimeout in ${remainingTime} seconds...`
+            // If we get here, we've timed out
+            throw new Error(
+                'Could not find an active Spotify device.\n\n' +
+                'Please ensure:\n' +
+                '• Spotify app is installed and open\n' +
+                '• You are logged into the same account\n' +
+                '• Music is currently playing\n' +
+                '• Device has internet connection\n\n' +
+                'Then refresh this page to try again.'
             );
-        }
-    }
-    
-    throw new Error(
-        'Could not find an active Spotify device.\n\n' +
-        'Please ensure:\n' +
-        '• Spotify app is installed and open\n' +
-        '• You are logged into the same account\n' +
-        '• Music is currently playing\n' +
-        '• Device has internet connection'
-    );
-}
-
-// Also update the startGameSession function to handle device transfer
-async function startGameSession() {
-    try {
-        // Get user profile with timeout
-        const profile = await Promise.race([
-            app.client.request('/v1/me'),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-            )
-        ]);
-        
-        const country = new URLSearchParams(window.location.search).get('country') || 
-                       sessionStorage.getItem('country') || 
-                       profile.country || 'US';
-        
-        // Generate track list with timeout
-        const tracks = await Promise.race([
-            generateTrackList(country),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Track generation timeout')), 10000)
-            )
-        ]);
-        
-        // Create playlists in parallel
-        const playlistNames = generatePlaylistNames(country);
-        const [publicPlaylist, privatePlaylist] = await Promise.all([
-            createPlaylist(profile.id, playlistNames.public, true).catch(err => {
-                console.warn('Public playlist creation failed:', err);
-                return null;
-            }),
-            createPlaylist(profile.id, playlistNames.private, false).catch(err => {
-                console.warn('Private playlist creation failed:', err);
-                return null;
-            })
-        ]);
-        
-        // Add tracks to playlists (non-blocking)
-        const trackUris = tracks.map(id => `spotify:track:${id}`);
-        if (publicPlaylist) {
-            addTracksToPlaylist(publicPlaylist.id, trackUris).catch(err => 
-                console.warn('Failed to add tracks to public playlist:', err)
-            );
-        }
-        if (privatePlaylist) {
-            addTracksToPlaylist(privatePlaylist.id, trackUris).catch(err => 
-                console.warn('Failed to add tracks to private playlist:', err)
-            );
-        }
-        
-        // Initialize game session
-        app.engine.initializeSession(tracks, profile.id, generateUUID());
-        
-        // IMPORTANT: Wait for Web Playback SDK device to be ready
-        await waitForWebPlaybackDevice();
-        
-        // Now transfer playback to our game and start the playlist
-        const playlistToUse = publicPlaylist || privatePlaylist;
-        if (playlistToUse) {
-            // Transfer playback to the Web Playback SDK device
-            await transferPlaybackToGame();
-            
-            // Start our playlist
-            await app.playback.startPlayback(playlistToUse.uri, 0);
-            app.playback.lockControls(playlistToUse.uri, tracks);
-        } else {
-            throw new Error('Failed to create any playlists');
-        }
-        
-    } catch (error) {
-        console.error('Failed to start game session:', error);
-        throw new Error('Failed to start game session: ' + error.message);
-    }
-}
-
-// Wait for the Web Playback SDK device to be ready
-async function waitForWebPlaybackDevice() {
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Web Playback SDK device not ready'));
-        }, 15000);
-        
-        // Check if device is already ready
-        if (app.playback && app.playback.getDeviceId()) {
-            clearTimeout(timeout);
-            resolve();
-            return;
-        }
-        
-        // Wait for ready callback
-        if (app.playback) {
-            app.playback.onReady = (deviceId) => {
-                clearTimeout(timeout);
-                console.log('Web Playback SDK ready with device:', deviceId);
-                resolve();
-            };
-        } else {
-            reject(new Error('Playback not initialized'));
-        }
-    });
-}
-
-// Transfer active playback to the rhythm game's Web Playback SDK device
-async function transferPlaybackToGame() {
-    const gameDeviceId = app.playback.getDeviceId();
-    if (!gameDeviceId) {
-        throw new Error('Game device not ready');
-    }
-    
-    try {
-        // Transfer playback to our Web Playback SDK device
-        await app.client.request(`/v1/me/player`, {
-            method: 'PUT',
-            body: JSON.stringify({
-                device_ids: [gameDeviceId],
-                play: false // Don't start playing yet
-            })
-        });
-        
-        // Wait a moment for the transfer to complete
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        console.log('Playback transferred to rhythm game device');
-        
-    } catch (error) {
-        console.error('Failed to transfer playback:', error);
-        throw new Error('Could not transfer playback to game. Please try refreshing.');
-    }
-}
         }
 
         async function startGameSession() {
@@ -813,9 +700,17 @@ async function transferPlaybackToGame() {
                 // Initialize game session
                 app.engine.initializeSession(tracks, profile.id, generateUUID());
                 
-                // Start playback
+                // Wait for Web Playback SDK device to be ready
+                updateShieldMessage('Preparing game audio...');
+                await waitForWebPlaybackDevice();
+                
+                // Transfer playback from user's device to our game
+                await transferPlaybackToGame();
+                
+                // Now start our playlist
                 const playlistToUse = publicPlaylist || privatePlaylist;
                 if (playlistToUse) {
+                    updateShieldMessage('Starting game playlist...');
                     await app.playback.startPlayback(playlistToUse.uri, 0);
                     app.playback.lockControls(playlistToUse.uri, tracks);
                 } else {
@@ -825,6 +720,91 @@ async function transferPlaybackToGame() {
             } catch (error) {
                 console.error('Failed to start game session:', error);
                 throw new Error('Failed to start game session: ' + error.message);
+            }
+        }
+
+        // Helper function to wait for Web Playback SDK device to be ready
+        async function waitForWebPlaybackDevice() {
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Web Playback SDK device not ready within 15 seconds'));
+                }, 15000);
+                
+                // Check if device is already ready
+                if (app.playback && app.playback.getDeviceId()) {
+                    clearTimeout(timeout);
+                    console.log('Web Playback SDK device already ready');
+                    resolve();
+                    return;
+                }
+                
+                // Wait for ready callback
+                if (app.playback) {
+                    const originalOnReady = app.playback.onReady;
+                    app.playback.onReady = (deviceId) => {
+                        clearTimeout(timeout);
+                        console.log('Web Playback SDK ready with device:', deviceId);
+                        
+                        // Call original callback if it existed
+                        if (originalOnReady) {
+                            originalOnReady(deviceId);
+                        }
+                        
+                        resolve();
+                    };
+                } else {
+                    clearTimeout(timeout);
+                    reject(new Error('Playback not initialized'));
+                }
+            });
+        }
+
+        // Helper function to transfer playback control to the game
+        async function transferPlaybackToGame() {
+            const gameDeviceId = app.playback.getDeviceId();
+            if (!gameDeviceId) {
+                throw new Error('Game device not ready');
+            }
+            
+            try {
+                updateShieldMessage('Transferring playback to game...');
+                
+                // Transfer playback to our Web Playback SDK device
+                await app.client.request(`/v1/me/player`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        device_ids: [gameDeviceId],
+                        play: false // Don't start playing yet - we'll control that
+                    })
+                });
+                
+                // Wait for the transfer to complete
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Verify the transfer worked
+                try {
+                    const currentState = await app.client.request('/v1/me/player');
+                    if (currentState.device && currentState.device.id === gameDeviceId) {
+                        console.log('Playback successfully transferred to rhythm game device');
+                    } else {
+                        console.warn('Playback transfer may not have completed fully');
+                    }
+                } catch (stateError) {
+                    // Don't fail if we can't verify - the transfer might still work
+                    console.warn('Could not verify playback transfer:', stateError);
+                }
+                
+            } catch (error) {
+                console.error('Failed to transfer playback:', error);
+                
+                // More specific error messages
+                if (error.status === 404) {
+                    throw new Error('No active playback found. Please start playing music in Spotify first.');
+                } else if (error.status === 403) {
+                    throw new Error(config.ERRORS.NO_PREMIUM);
+                } else {
+                    throw new Error('Could not transfer playback to game. Please ensure Spotify is still playing and try refreshing.');
+                }
             }
         }
 
