@@ -9,16 +9,44 @@ export class PKCE {
     }
 
     /**
+     * Return the available crypto implementation for the current environment
+     * @returns {Crypto|null}
+     */
+    getCrypto() {
+        if (typeof window !== 'undefined') {
+            return window.crypto || window.msCrypto || null;
+        }
+
+        // Fallback for non-browser contexts (shouldn't normally be hit)
+        if (typeof crypto !== 'undefined') {
+            return crypto;
+        }
+
+        return null;
+    }
+
+    /**
      * Generate a cryptographically secure random string for PKCE
      * @param {number} length - Length of the string to generate
      * @returns {string} Random string
      */
     generateRandomString(length = 64) {
         const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-        const values = new Uint8Array(length);
-        crypto.getRandomValues(values);
-        
-        return Array.from(values, byte => charset[byte % charset.length]).join('');
+        const cryptoImpl = this.getCrypto();
+
+        if (cryptoImpl && typeof cryptoImpl.getRandomValues === 'function') {
+            const values = new Uint8Array(length);
+            cryptoImpl.getRandomValues(values);
+            return Array.from(values, byte => charset[byte % charset.length]).join('');
+        }
+
+        // Non-cryptographic fallback so the app can still run on insecure contexts
+        let randomString = '';
+        for (let i = 0; i < length; i++) {
+            const randomIndex = Math.floor(Math.random() * charset.length);
+            randomString += charset[randomIndex];
+        }
+        return randomString;
     }
 
     /**
@@ -27,9 +55,15 @@ export class PKCE {
      * @returns {Promise<string>} Base64url encoded hash
      */
     async sha256(plain) {
+        const cryptoImpl = this.getCrypto();
+
+        if (!cryptoImpl || !cryptoImpl.subtle || typeof cryptoImpl.subtle.digest !== 'function') {
+            throw new Error('SHA-256 digest is not supported in this context');
+        }
+
         const encoder = new TextEncoder();
         const data = encoder.encode(plain);
-        const digest = await crypto.subtle.digest('SHA-256', data);
+        const digest = await cryptoImpl.subtle.digest('SHA-256', data);
         return this.base64UrlEncode(digest);
     }
 
@@ -57,7 +91,18 @@ export class PKCE {
     async generateAuthUrl(scope) {
         // Generate PKCE parameters
         const codeVerifier = this.generateRandomString(64);
-        const codeChallenge = await this.sha256(codeVerifier);
+
+        let codeChallenge;
+        let challengeMethod = 'S256';
+
+        try {
+            codeChallenge = await this.sha256(codeVerifier);
+        } catch (error) {
+            // Fallback to plain challenge when SHA-256 isn't available (e.g. non-secure contexts)
+            console.warn('Falling back to plain PKCE challenge due to missing Web Crypto support:', error);
+            codeChallenge = codeVerifier;
+            challengeMethod = 'plain';
+        }
         const state = this.generateRandomString(32);
 
         // Store PKCE parameters for later use
@@ -71,7 +116,7 @@ export class PKCE {
             scope: scope,
             redirect_uri: this.redirectUri,
             state: state,
-            code_challenge_method: 'S256',
+            code_challenge_method: challengeMethod,
             code_challenge: codeChallenge,
             // Additional parameters for better UX
             show_dialog: 'false'

@@ -3,7 +3,7 @@
 export const config = {
     // Spotify App Configuration
     CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-    REDIRECT_URI: window.location.origin + '/auth.html',
+    REDIRECT_URI: new URL('./auth.html', window.location.href).toString(),
     
     // Feature Flags
     USE_WORKER: false,
