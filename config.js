@@ -1,9 +1,24 @@
 // config.js - Single source of truth for all configuration
 
+// Helper function to determine the correct redirect URI
+function getRedirectUri() {
+    // For production, use the known Vercel URL
+    if (window.location.hostname === 'rhythm-game-phi.vercel.app') {
+        return 'https://rhythm-game-phi.vercel.app/auth.html';
+    }
+    
+    // For local development, construct dynamically
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+    return baseUrl + 'auth.html';
+}
+
 export const config = {
     // Spotify App Configuration
     CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
-    REDIRECT_URI: new URL('./auth.html', window.location.href).toString(),
+    REDIRECT_URI: getRedirectUri(),
+    
+    // Alternative: hardcode your redirect URI for production
+    // REDIRECT_URI: 'https://yourdomain.com/auth.html',
     
     // Feature Flags
     USE_WORKER: false,
@@ -17,6 +32,8 @@ export const config = {
     
     // Required Spotify scopes (exact string as specified)
     SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
+    
+    // ... rest of your config remains the same
     
     // Gameplay Constants
     DIFFICULTY_SETTINGS: {
