@@ -2,7 +2,7 @@
 
 export const config = {
     // Spotify App Configuration
-    CLIENT_ID: 'your_spotify_client_id_here',
+    CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
     REDIRECT_URI: window.location.origin + '/auth.html',
     
     // Feature Flags
@@ -193,7 +193,7 @@ export const config = {
 export function validateConfig() {
     const errors = [];
     
-    if (!config.CLIENT_ID || config.CLIENT_ID === 'your_spotify_client_id_here') {
+    if (!config.CLIENT_ID || config.CLIENT_ID === '07f4566e6a2a4428ac68ec86d73adf34') {
         errors.push('CLIENT_ID must be set to your Spotify application client ID');
     }
     
