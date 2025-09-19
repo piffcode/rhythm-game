@@ -1,21 +1,20 @@
-// improved-midi-chart-generator.js - Generate rhythm game charts from MIDI with precise timing
+// improved-midi-chart-generator.js - Fixed MIDI parsing and timing conversion
 
 import { config } from './config.js';
 
 export class MidiChartGenerator {
     constructor() {
-        this.trackMidiData = new Map(); // Store MIDI data for each track
+        this.trackMidiData = new Map();
         this.loadMidiFiles();
     }
 
     /**
-     * Load MIDI files for your locked tracks
+     * Load MIDI files for locked tracks
      */
     async loadMidiFiles() {
-        // Define your track-to-MIDI mapping
         const trackMidiMap = {
-            '5FMyXeZ0reYloRTiCkPprT': 'track1.mid', // Your first locked track
-            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid'  // Your second locked track
+            '5FMyXeZ0reYloRTiCkPprT': 'track1.mid',
+            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid'
         };
 
         for (const [trackId, midiFile] of Object.entries(trackMidiMap)) {
@@ -24,13 +23,13 @@ export class MidiChartGenerator {
                 this.trackMidiData.set(trackId, midiData);
                 console.log(`Loaded MIDI for track ${trackId}: ${midiFile}`);
             } catch (error) {
-                console.error(`Failed to load MIDI for ${trackId}:`, error);
+                console.warn(`Failed to load MIDI for ${trackId}:`, error);
             }
         }
     }
 
     /**
-     * Load and parse a MIDI file
+     * Load and parse a MIDI file with better error handling
      */
     async loadMidiFile(url) {
         try {
@@ -47,13 +46,19 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Parse MIDI file binary data
+     * Parse MIDI file with improved timing accuracy
      */
     parseMidiFile(arrayBuffer) {
         const dataView = new DataView(arrayBuffer);
         let offset = 0;
 
-        // Read MIDI header
+        // Validate MIDI header
+        const headerSignature = new TextDecoder().decode(new Uint8Array(arrayBuffer, 0, 4));
+        if (headerSignature !== 'MThd') {
+            throw new Error('Invalid MIDI file: missing MThd header');
+        }
+
+        // Read header
         const headerChunk = this.readMidiHeader(dataView, offset);
         offset += headerChunk.length + 8;
 
@@ -61,47 +66,71 @@ export class MidiChartGenerator {
             format: headerChunk.format,
             trackCount: headerChunk.trackCount,
             ticksPerQuarter: headerChunk.ticksPerQuarter,
-            tracks: []
+            tracks: [],
+            tempoMap: [], // Store tempo changes
+            timeSignatureMap: [] // Store time signature changes
         };
 
-        // Read tracks
+        // Read all tracks
         for (let i = 0; i < headerChunk.trackCount && offset < arrayBuffer.byteLength; i++) {
-            const track = this.readMidiTrack(dataView, offset);
-            midi.tracks.push(track.events);
-            offset += track.length + 8;
+            try {
+                const track = this.readMidiTrack(dataView, offset);
+                midi.tracks.push(track.events);
+                offset += track.length + 8;
+            } catch (error) {
+                console.warn(`Error reading track ${i}:`, error);
+                break;
+            }
         }
+
+        // Extract tempo and time signature information
+        this.extractTimingMaps(midi);
 
         return midi;
     }
 
     /**
-     * Read MIDI header chunk
+     * Read MIDI header with validation
      */
     readMidiHeader(dataView, offset) {
-        // Skip "MThd" identifier (4 bytes)
-        offset += 4;
+        offset += 4; // Skip "MThd"
         
         const length = dataView.getUint32(offset);
+        if (length !== 6) {
+            throw new Error('Invalid MIDI header length');
+        }
         offset += 4;
         
         const format = dataView.getUint16(offset);
+        if (format > 2) {
+            throw new Error(`Unsupported MIDI format: ${format}`);
+        }
         offset += 2;
         
         const trackCount = dataView.getUint16(offset);
         offset += 2;
         
         const ticksPerQuarter = dataView.getUint16(offset);
-        offset += 2;
-
+        if (ticksPerQuarter === 0) {
+            throw new Error('Invalid ticks per quarter note');
+        }
+        
         return { length, format, trackCount, ticksPerQuarter };
     }
 
     /**
-     * Read a MIDI track chunk
+     * Read MIDI track with better error handling
      */
     readMidiTrack(dataView, offset) {
-        // Skip "MTrk" identifier (4 bytes)
-        offset += 4;
+        const trackSignature = new TextDecoder().decode(
+            new Uint8Array(dataView.buffer, offset, 4)
+        );
+        
+        if (trackSignature !== 'MTrk') {
+            throw new Error('Invalid track header');
+        }
+        
+        offset += 4; // Skip "MTrk"
         
         const length = dataView.getUint32(offset);
         offset += 4;
@@ -112,20 +141,29 @@ export class MidiChartGenerator {
         let runningStatus = 0;
 
         while (offset < endOffset) {
-            // Read variable length delta time
-            const { value: deltaTime, bytesRead } = this.readVariableLength(dataView, offset);
-            offset += bytesRead;
-            currentTime += deltaTime;
+            try {
+                // Read delta time
+                const { value: deltaTime, bytesRead } = this.readVariableLength(dataView, offset);
+                offset += bytesRead;
+                currentTime += deltaTime;
 
-            // Read event
-            const event = this.readMidiEvent(dataView, offset, currentTime, runningStatus);
-            if (event.bytesRead === 0) break; // Safety check
-            
-            offset += event.bytesRead;
-            events.push(event);
-            
-            if (event.type !== 'meta' && event.type !== 'sysex') {
-                runningStatus = event.status;
+                // Read event
+                const event = this.readMidiEvent(dataView, offset, currentTime, runningStatus);
+                if (event.bytesRead === 0) {
+                    console.warn('Zero-length event, stopping track parsing');
+                    break;
+                }
+                
+                offset += event.bytesRead;
+                events.push(event);
+                
+                if (event.type !== 'meta' && event.type !== 'sysex') {
+                    runningStatus = event.status;
+                }
+                
+            } catch (eventError) {
+                console.warn('Error parsing MIDI event, skipping:', eventError);
+                break;
             }
         }
 
@@ -133,13 +171,67 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Read a variable length quantity from MIDI
+     * Extract tempo and time signature maps for accurate timing
+     */
+    extractTimingMaps(midi) {
+        const tempoMap = [];
+        const timeSignatureMap = [];
+
+        for (const track of midi.tracks) {
+            for (const event of track) {
+                if (event.type === 'meta') {
+                    if (event.metaType === 0x51 && event.tempo) {
+                        tempoMap.push({
+                            tick: event.time,
+                            tempo: event.tempo,
+                            microsecondsPerQuarter: 60000000 / event.tempo
+                        });
+                    } else if (event.metaType === 0x58 && event.timeSignature) {
+                        timeSignatureMap.push({
+                            tick: event.time,
+                            ...event.timeSignature
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort by time
+        tempoMap.sort((a, b) => a.tick - b.tick);
+        timeSignatureMap.sort((a, b) => a.tick - b.tick);
+
+        // Add default tempo if none found
+        if (tempoMap.length === 0) {
+            tempoMap.push({
+                tick: 0,
+                tempo: 120,
+                microsecondsPerQuarter: 500000
+            });
+        }
+
+        // Add default time signature if none found
+        if (timeSignatureMap.length === 0) {
+            timeSignatureMap.push({
+                tick: 0,
+                numerator: 4,
+                denominator: 4,
+                clocksPerClick: 24,
+                thirtySecondsPer24Clocks: 8
+            });
+        }
+
+        midi.tempoMap = tempoMap;
+        midi.timeSignatureMap = timeSignatureMap;
+    }
+
+    /**
+     * Read variable length quantity with bounds checking
      */
     readVariableLength(dataView, offset) {
         let value = 0;
         let bytesRead = 0;
         
-        while (bytesRead < 4) {
+        while (bytesRead < 4 && offset + bytesRead < dataView.byteLength) {
             const byte = dataView.getUint8(offset + bytesRead);
             value = (value << 7) | (byte & 0x7F);
             bytesRead++;
@@ -151,34 +243,7 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Read a MIDI event
-     */
-    readMidiEvent(dataView, offset, time, runningStatus) {
-        const firstByte = dataView.getUint8(offset);
-        
-        if (firstByte === 0xFF) {
-            // Meta event
-            return this.readMetaEvent(dataView, offset, time);
-        } else if (firstByte === 0xF0 || firstByte === 0xF7) {
-            // System exclusive
-            return this.readSysexEvent(dataView, offset, time);
-        } else {
-            // Channel event
-            let status = firstByte;
-            let dataOffset = offset + 1;
-            
-            if (firstByte < 0x80) {
-                // Running status
-                status = runningStatus;
-                dataOffset = offset;
-            }
-            
-            return this.readChannelEvent(dataView, dataOffset, time, status);
-        }
-    }
-
-    /**
-     * Read meta event (tempo, time signature, etc.)
+     * Read meta event with proper parsing
      */
     readMetaEvent(dataView, offset, time) {
         const type = dataView.getUint8(offset + 1);
@@ -191,28 +256,33 @@ export class MidiChartGenerator {
             bytesRead: 2 + lengthBytes + length
         };
 
-        // Parse specific meta events
+        const dataOffset = offset + 2 + lengthBytes;
+
         switch (type) {
-            case 0x51: // Tempo
+            case 0x51: // Set Tempo
                 if (length === 3) {
                     const microsecondsPerQuarter = 
-                        (dataView.getUint8(offset + 2 + lengthBytes) << 16) |
-                        (dataView.getUint8(offset + 3 + lengthBytes) << 8) |
-                        dataView.getUint8(offset + 4 + lengthBytes);
-                    event.tempo = 60000000 / microsecondsPerQuarter; // BPM
+                        (dataView.getUint8(dataOffset) << 16) |
+                        (dataView.getUint8(dataOffset + 1) << 8) |
+                        dataView.getUint8(dataOffset + 2);
+                    event.tempo = Math.round(60000000 / microsecondsPerQuarter);
                     event.microsecondsPerQuarter = microsecondsPerQuarter;
                 }
                 break;
                 
-            case 0x58: // Time signature
+            case 0x58: // Time Signature
                 if (length === 4) {
                     event.timeSignature = {
-                        numerator: dataView.getUint8(offset + 2 + lengthBytes),
-                        denominator: Math.pow(2, dataView.getUint8(offset + 3 + lengthBytes)),
-                        clocksPerClick: dataView.getUint8(offset + 4 + lengthBytes),
-                        thirtySecondsPer24Clocks: dataView.getUint8(offset + 5 + lengthBytes)
+                        numerator: dataView.getUint8(dataOffset),
+                        denominator: Math.pow(2, dataView.getUint8(dataOffset + 1)),
+                        clocksPerClick: dataView.getUint8(dataOffset + 2),
+                        thirtySecondsPer24Clocks: dataView.getUint8(dataOffset + 3)
                     };
                 }
+                break;
+                
+            case 0x2F: // End of Track
+                event.endOfTrack = true;
                 break;
         }
 
@@ -233,25 +303,32 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Read channel event (note on/off, etc.)
+     * Read channel event with proper status handling
      */
     readChannelEvent(dataView, offset, time, status) {
         const eventType = (status >> 4) & 0x0F;
         const channel = status & 0x0F;
         
-        let bytesRead = 1; // Status byte already consumed
+        let bytesRead = 1; // Status byte
         let data1 = 0, data2 = 0;
         
         // Read data bytes based on event type
-        if (eventType !== 0x0C && eventType !== 0x0D) {
-            // Most events have 2 data bytes
-            data1 = dataView.getUint8(offset);
-            data2 = dataView.getUint8(offset + 1);
-            bytesRead = 2;
-        } else {
-            // Program change and channel pressure have 1 data byte
-            data1 = dataView.getUint8(offset);
-            bytesRead = 1;
+        switch (eventType) {
+            case 0x08: // Note Off
+            case 0x09: // Note On
+            case 0x0A: // Polyphonic Key Pressure
+            case 0x0B: // Control Change
+            case 0x0E: // Pitch Bend
+                data1 = dataView.getUint8(offset);
+                data2 = dataView.getUint8(offset + 1);
+                bytesRead = 2;
+                break;
+                
+            case 0x0C: // Program Change
+            case 0x0D: // Channel Pressure
+                data1 = dataView.getUint8(offset);
+                bytesRead = 1;
+                break;
         }
 
         const event = {
@@ -266,13 +343,13 @@ export class MidiChartGenerator {
 
         // Add semantic meaning
         switch (eventType) {
-            case 0x08: // Note off
+            case 0x08: // Note Off
                 event.eventType = 'noteOff';
                 event.note = data1;
                 event.velocity = data2;
                 break;
                 
-            case 0x09: // Note on (or off if velocity = 0)
+            case 0x09: // Note On
                 event.eventType = (data2 === 0) ? 'noteOff' : 'noteOn';
                 event.note = data1;
                 event.velocity = data2;
@@ -283,7 +360,72 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Generate rhythm game chart from MIDI data with improved timing
+     * Read MIDI event with proper error handling
+     */
+    readMidiEvent(dataView, offset, time, runningStatus) {
+        if (offset >= dataView.byteLength) {
+            return { type: 'error', bytesRead: 0 };
+        }
+        
+        const firstByte = dataView.getUint8(offset);
+        
+        if (firstByte === 0xFF) {
+            return this.readMetaEvent(dataView, offset, time);
+        } else if (firstByte === 0xF0 || firstByte === 0xF7) {
+            return this.readSysexEvent(dataView, offset, time);
+        } else {
+            let status = firstByte;
+            let dataOffset = offset + 1;
+            
+            if (firstByte < 0x80) {
+                // Running status
+                status = runningStatus;
+                dataOffset = offset;
+            }
+            
+            return this.readChannelEvent(dataView, dataOffset, time, status);
+        }
+    }
+
+    /**
+     * Convert MIDI ticks to milliseconds with precise tempo tracking
+     */
+    convertTicksToMilliseconds(ticks, tempoMap, ticksPerQuarter) {
+        let currentTime = 0; // in milliseconds
+        let currentTick = 0;
+        let tempoIndex = 0;
+        let currentTempo = tempoMap[0];
+
+        // If target tick is before or at current tempo, calculate directly
+        if (ticks <= currentTempo.tick) {
+            const tickDiff = ticks - currentTick;
+            const msPerTick = currentTempo.microsecondsPerQuarter / ticksPerQuarter / 1000;
+            return currentTime + (tickDiff * msPerTick);
+        }
+
+        // Step through tempo changes
+        while (tempoIndex < tempoMap.length - 1 && ticks > tempoMap[tempoIndex + 1].tick) {
+            const nextTempo = tempoMap[tempoIndex + 1];
+            
+            // Calculate time for this tempo segment
+            const ticksInSegment = nextTempo.tick - currentTick;
+            const msPerTick = currentTempo.microsecondsPerQuarter / ticksPerQuarter / 1000;
+            currentTime += ticksInSegment * msPerTick;
+            
+            // Move to next segment
+            currentTick = nextTempo.tick;
+            currentTempo = nextTempo;
+            tempoIndex++;
+        }
+
+        // Calculate remaining time with final tempo
+        const remainingTicks = ticks - currentTick;
+        const msPerTick = currentTempo.microsecondsPerQuarter / ticksPerQuarter / 1000;
+        return currentTime + (remainingTicks * msPerTick);
+    }
+
+    /**
+     * Generate rhythm game chart from MIDI with precise timing
      */
     generateChartFromMidi(trackId, difficulty = 'NORMAL') {
         const midiData = this.trackMidiData.get(trackId);
@@ -294,24 +436,24 @@ export class MidiChartGenerator {
         const difficultySettings = config.DIFFICULTY_SETTINGS[difficulty];
         const lanes = difficultySettings.lanes;
 
-        console.log(`Generating ${difficulty} chart from MIDI for track ${trackId}`);
+        console.log(`Generating ${difficulty} MIDI chart for track ${trackId}`);
+        console.log(`MIDI: ${midiData.tracks.length} tracks, ${midiData.ticksPerQuarter} ticks/quarter`);
+        console.log(`Tempo changes: ${midiData.tempoMap.length}`);
 
-        // Extract note events and tempo changes
+        // Extract note events
         const noteEvents = this.extractNoteEvents(midiData);
-        const tempoMap = this.extractTempoMap(midiData);
+        console.log(`Extracted ${noteEvents.length} note events`);
 
-        console.log(`Found ${noteEvents.length} note events and ${tempoMap.length} tempo changes`);
+        // Convert to timed events with precise timing
+        const timedEvents = this.convertToTimedEvents(noteEvents, midiData);
+        console.log(`Generated ${timedEvents.length} timed events`);
 
-        // Convert MIDI ticks to precise milliseconds
-        const timedNotes = this.convertTicksToTimeAdvanced(noteEvents, tempoMap, midiData.ticksPerQuarter);
+        // Convert to rhythm game notes
+        const gameNotes = this.convertToGameNotes(timedEvents, lanes, difficulty);
+        console.log(`Generated ${gameNotes.length} game notes`);
 
-        console.log(`Converted to ${timedNotes.length} timed notes`);
-
-        // Generate rhythm game notes with better mapping
-        const gameNotes = this.convertToGameNotesAdvanced(timedNotes, lanes, difficulty);
-
-        // Apply difficulty-specific filtering and optimization
-        const finalNotes = this.optimizeChart(gameNotes, difficulty);
+        // Apply difficulty filtering
+        const finalNotes = this.applyDifficultyFilter(gameNotes, difficulty);
 
         const chart = {
             notes: finalNotes,
@@ -322,27 +464,33 @@ export class MidiChartGenerator {
                 holdNotes: finalNotes.filter(n => n.type === 'hold').length,
                 source: 'midi',
                 trackId: trackId,
-                generatedAt: Date.now(),
-                tempoChanges: tempoMap.length,
-                originalMidiNotes: noteEvents.length
+                ticksPerQuarter: midiData.ticksPerQuarter,
+                tempoChanges: midiData.tempoMap.length,
+                generatedAt: Date.now()
             }
         };
 
-        console.log(`Generated MIDI chart: ${chart.metadata.totalNotes} notes, ${chart.metadata.holdNotes} holds`);
+        console.log(`Final MIDI chart: ${chart.metadata.totalNotes} notes, ${chart.metadata.holdNotes} holds`);
         return chart;
     }
 
     /**
-     * Extract note on/off events from MIDI data
+     * Extract note events from all tracks
      */
     extractNoteEvents(midiData) {
         const noteEvents = [];
         
-        for (const track of midiData.tracks) {
+        for (let trackIndex = 0; trackIndex < midiData.tracks.length; trackIndex++) {
+            const track = midiData.tracks[trackIndex];
+            
             for (const event of track) {
                 if (event.type === 'channel' && 
                     (event.eventType === 'noteOn' || event.eventType === 'noteOff')) {
-                    noteEvents.push(event);
+                    
+                    noteEvents.push({
+                        ...event,
+                        trackIndex: trackIndex
+                    });
                 }
             }
         }
@@ -351,138 +499,74 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Extract tempo changes from MIDI data with defaults
+     * Convert MIDI events to timed events with precise timing
      */
-    extractTempoMap(midiData) {
-        const tempoEvents = [];
+    convertToTimedEvents(noteEvents, midiData) {
+        const timedEvents = [];
         
-        for (const track of midiData.tracks) {
-            for (const event of track) {
-                if (event.type === 'meta' && event.metaType === 0x51 && event.tempo) {
-                    tempoEvents.push({
-                        time: event.time,
-                        tempo: event.tempo,
-                        microsecondsPerQuarter: event.microsecondsPerQuarter || (60000000 / event.tempo)
-                    });
-                }
-            }
-        }
-        
-        // Add default tempo if none found
-        if (tempoEvents.length === 0) {
-            tempoEvents.push({ 
-                time: 0, 
-                tempo: 120, 
-                microsecondsPerQuarter: 500000 // 120 BPM = 500,000 microseconds per quarter note
+        for (const event of noteEvents) {
+            const timeMs = this.convertTicksToMilliseconds(
+                event.time, 
+                midiData.tempoMap, 
+                midiData.ticksPerQuarter
+            );
+            
+            timedEvents.push({
+                ...event,
+                timeMs: Math.round(timeMs)
             });
         }
         
-        return tempoEvents.sort((a, b) => a.time - b.time);
+        return timedEvents;
     }
 
     /**
-     * Convert MIDI ticks to milliseconds with improved precision
+     * Convert timed events to rhythm game notes
      */
-    convertTicksToTimeAdvanced(noteEvents, tempoMap, ticksPerQuarter) {
-        const timedNotes = [];
-        let currentTempoIndex = 0;
-        let currentTempo = tempoMap[0];
-        let cumulativeMs = 0;
-        let lastTickTime = 0;
-        
-        // Build a comprehensive time map
-        const timeMap = new Map();
-        
-        // Create sorted list of all timing events
-        const allEvents = [...noteEvents, ...tempoMap].sort((a, b) => a.time - b.time);
-        
-        for (const event of allEvents) {
-            const tickTime = event.time;
-            
-            // Update tempo if we've hit a tempo change
-            while (currentTempoIndex + 1 < tempoMap.length && 
-                   tickTime >= tempoMap[currentTempoIndex + 1].time) {
-                // Calculate time elapsed at current tempo
-                const tickDelta = tempoMap[currentTempoIndex + 1].time - lastTickTime;
-                const msDelta = (tickDelta / ticksPerQuarter) * (currentTempo.microsecondsPerQuarter / 1000);
-                cumulativeMs += msDelta;
-                
-                lastTickTime = tempoMap[currentTempoIndex + 1].time;
-                currentTempoIndex++;
-                currentTempo = tempoMap[currentTempoIndex];
-            }
-            
-            // Calculate time for this event
-            const tickDelta = tickTime - lastTickTime;
-            const msDelta = (tickDelta / ticksPerQuarter) * (currentTempo.microsecondsPerQuarter / 1000);
-            const eventTimeMs = cumulativeMs + msDelta;
-            
-            // Store in time map for quick lookup
-            if (!timeMap.has(tickTime)) {
-                timeMap.set(tickTime, Math.round(eventTimeMs * 100) / 100); // Round to 0.01ms precision
-            }
-            
-            // If this is a note event, convert it
-            if (event.eventType === 'noteOn' || event.eventType === 'noteOff') {
-                timedNotes.push({
-                    ...event,
-                    timeMs: timeMap.get(tickTime)
-                });
-            }
-        }
-        
-        return timedNotes.sort((a, b) => a.timeMs - b.timeMs);
-    }
-
-    /**
-     * Convert MIDI notes to rhythm game notes with advanced mapping
-     */
-    convertToGameNotesAdvanced(timedNotes, laneCount, difficulty) {
+    convertToGameNotes(timedEvents, laneCount, difficulty) {
         const gameNotes = [];
-        const activeNotes = new Map(); // Track held notes
+        const activeNotes = new Map(); // Track note-on events for hold conversion
         
-        // Analyze note patterns for intelligent lane assignment
-        const noteAnalysis = this.analyzeNotePatterns(timedNotes);
-        const laneMapper = this.createAdvancedLaneMapper(noteAnalysis, laneCount);
+        // Create pitch to lane mapping
+        const pitchMapping = this.createPitchToLaneMapping(timedEvents, laneCount);
         
-        for (const midiNote of timedNotes) {
-            const lane = laneMapper.getLane(midiNote);
-            if (lane === -1) continue; // Skip unmapped notes
+        for (const event of timedEvents) {
+            const lane = pitchMapping.get(event.note);
+            if (lane === undefined) continue;
             
-            if (midiNote.eventType === 'noteOn') {
+            const noteKey = `${event.note}_${event.channel}_${lane}`;
+            
+            if (event.eventType === 'noteOn' && event.velocity > 0) {
+                // Start of note
                 const gameNote = {
-                    time: midiNote.timeMs,
+                    time: event.timeMs,
                     lane: lane,
                     type: 'tap',
-                    velocity: midiNote.velocity,
-                    pitch: midiNote.note,
-                    channel: midiNote.channel,
-                    originalTick: midiNote.time // Keep original tick for debugging
+                    velocity: event.velocity,
+                    pitch: event.note,
+                    channel: event.channel
                 };
                 
-                // Track this note for potential hold conversion
-                const noteKey = `${midiNote.note}_${midiNote.channel}`;
+                // Track for potential hold conversion
                 activeNotes.set(noteKey, {
                     gameNote: gameNote,
-                    startTime: midiNote.timeMs
+                    startTime: event.timeMs
                 });
                 
                 gameNotes.push(gameNote);
                 
-            } else if (midiNote.eventType === 'noteOff') {
-                // End of a note - convert to hold if long enough
-                const noteKey = `${midiNote.note}_${midiNote.channel}`;
+            } else if (event.eventType === 'noteOff' || 
+                      (event.eventType === 'noteOn' && event.velocity === 0)) {
+                // End of note
                 const activeNote = activeNotes.get(noteKey);
                 
                 if (activeNote) {
-                    const duration = midiNote.timeMs - activeNote.startTime;
+                    const duration = event.timeMs - activeNote.startTime;
                     
-                    // More lenient hold note detection for rhythm games
-                    const minHoldDuration = Math.max(200, config.CHART.HOLD_MIN_DURATION * 0.6);
-                    
-                    if (duration >= minHoldDuration) {
+                    // Convert to hold note if long enough
+                    if (duration >= config.CHART.HOLD_MIN_DURATION) {
                         activeNote.gameNote.type = 'hold';
-                        activeNote.gameNote.endTime = midiNote.timeMs;
+                        activeNote.gameNote.endTime = event.timeMs;
                         activeNote.gameNote.duration = duration;
                     }
                     
@@ -495,204 +579,111 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Analyze MIDI note patterns for better lane assignment
+     * Create intelligent pitch to lane mapping
      */
-    analyzeNotePatterns(timedNotes) {
-        const pitchFrequency = new Map();
-        const channelFrequency = new Map();
-        const velocityDistribution = new Map();
-        const timeIntervals = [];
+    createPitchToLaneMapping(timedEvents, laneCount) {
+        // Analyze pitch usage frequency and range
+        const pitchStats = new Map();
+        let minPitch = 127;
+        let maxPitch = 0;
         
-        let lastTime = 0;
-        
-        for (const note of timedNotes) {
-            if (note.eventType === 'noteOn') {
-                // Pitch frequency
-                pitchFrequency.set(note.note, (pitchFrequency.get(note.note) || 0) + 1);
-                
-                // Channel frequency
-                channelFrequency.set(note.channel, (channelFrequency.get(note.channel) || 0) + 1);
-                
-                // Velocity distribution
-                const velBucket = Math.floor(note.velocity / 16) * 16;
-                velocityDistribution.set(velBucket, (velocityDistribution.get(velBucket) || 0) + 1);
-                
-                // Time intervals
-                if (lastTime > 0) {
-                    timeIntervals.push(note.timeMs - lastTime);
-                }
-                lastTime = note.timeMs;
+        for (const event of timedEvents) {
+            if (event.eventType === 'noteOn' && event.velocity > 0) {
+                pitchStats.set(event.note, (pitchStats.get(event.note) || 0) + 1);
+                minPitch = Math.min(minPitch, event.note);
+                maxPitch = Math.max(maxPitch, event.note);
             }
         }
         
-        return {
-            pitchFrequency,
-            channelFrequency,
-            velocityDistribution,
-            averageInterval: timeIntervals.length > 0 ? 
-                timeIntervals.reduce((a, b) => a + b, 0) / timeIntervals.length : 0
-        };
-    }
-
-    /**
-     * Create advanced lane mapper based on note analysis
-     */
-    createAdvancedLaneMapper(analysis, laneCount) {
-        const { pitchFrequency, channelFrequency } = analysis;
-        
-        // Sort pitches by frequency and assign to lanes strategically
-        const sortedPitches = Array.from(pitchFrequency.entries())
-            .sort((a, b) => b[1] - a[1]);
+        // Get most frequently used pitches
+        const sortedPitches = Array.from(pitchStats.entries())
+            .sort((a, b) => b[1] - a[1]) // Sort by frequency descending
+            .slice(0, Math.min(laneCount * 3, pitchStats.size)); // Take up to 3x lanes
         
         const pitchToLane = new Map();
-        const channelToLanePreference = new Map();
         
-        // Primary lane assignment based on frequency
-        for (let i = 0; i < Math.min(sortedPitches.length, laneCount * 3); i++) {
-            const pitch = sortedPitches[i][0];
-            const preferredLane = i % laneCount;
-            pitchToLane.set(pitch, preferredLane);
+        if (sortedPitches.length <= laneCount) {
+            // Simple case: assign each pitch to a lane
+            sortedPitches.forEach((pitch, index) => {
+                pitchToLane.set(pitch[0], index % laneCount);
+            });
+        } else {
+            // Complex case: distribute pitches across lanes based on frequency and range
+            const pitchRange = maxPitch - minPitch;
+            
+            for (const [pitch, frequency] of sortedPitches) {
+                // Assign lane based on pitch range (lower pitches to left lanes)
+                let lane;
+                if (pitchRange > 0) {
+                    const normalizedPitch = (pitch - minPitch) / pitchRange;
+                    lane = Math.floor(normalizedPitch * laneCount);
+                } else {
+                    // All same pitch, distribute by frequency
+                    lane = sortedPitches.indexOf([pitch, frequency]) % laneCount;
+                }
+                
+                lane = Math.max(0, Math.min(laneCount - 1, lane));
+                pitchToLane.set(pitch, lane);
+            }
         }
         
-        // Channel-based lane preferences (for drums/percussion)
-        Array.from(channelFrequency.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, laneCount)
-            .forEach(([channel], index) => {
-                channelToLanePreference.set(channel, index);
-            });
-        
-        return {
-            getLane: (midiNote) => {
-                // Try pitch-based mapping first
-                if (pitchToLane.has(midiNote.note)) {
-                    return pitchToLane.get(midiNote.note);
-                }
-                
-                // Fallback to channel-based mapping
-                if (channelToLanePreference.has(midiNote.channel)) {
-                    return channelToLanePreference.get(midiNote.channel);
-                }
-                
-                // Final fallback: distribute by pitch range
-                const laneIndex = Math.floor(((midiNote.note - 21) / (108 - 21)) * laneCount);
-                return Math.max(0, Math.min(laneCount - 1, laneIndex));
-            }
-        };
+        return pitchToLane;
     }
 
     /**
-     * Optimize chart for better playability
+     * Apply difficulty-specific filtering and adjustments
      */
-    optimizeChart(notes, difficulty) {
+    applyDifficultyFilter(notes, difficulty) {
         const densityMultiplier = config.CHART.DENSITY_MULTIPLIERS[difficulty];
-        let optimizedNotes = [...notes];
         
-        // Remove notes that are too close together
-        optimizedNotes = this.removeOverlappingNotes(optimizedNotes);
-        
-        // Apply difficulty scaling
-        if (densityMultiplier < 1.0) {
-            optimizedNotes = this.reduceDensity(optimizedNotes, densityMultiplier);
+        if (densityMultiplier >= 1.0) {
+            return this.removeOverlappingNotes(notes);
         }
         
-        // Smooth out difficulty spikes
-        optimizedNotes = this.smoothDifficultySpikes(optimizedNotes);
+        // Filter notes based on difficulty
+        const minSpacing = config.CHART.MIN_NOTE_SPACING / densityMultiplier;
+        const filteredNotes = [];
         
-        // Ensure minimum spacing
-        optimizedNotes = this.enforceMinimumSpacing(optimizedNotes);
+        for (let i = 0; i < notes.length; i++) {
+            const note = notes[i];
+            
+            if (i === 0) {
+                filteredNotes.push(note);
+                continue;
+            }
+            
+            const lastNote = filteredNotes[filteredNotes.length - 1];
+            const timeDiff = note.time - lastNote.time;
+            
+            // Keep note if timing is good or if it's a special note
+            if (timeDiff >= minSpacing || 
+                note.type === 'hold' || 
+                note.velocity >= 100) {
+                filteredNotes.push(note);
+            }
+        }
         
-        return optimizedNotes.sort((a, b) => a.time - b.time);
+        return this.removeOverlappingNotes(filteredNotes);
     }
 
     /**
      * Remove overlapping notes in the same lane
      */
     removeOverlappingNotes(notes) {
+        const cleanNotes = [];
         const laneLastTime = new Map();
-        const filtered = [];
         
         for (const note of notes) {
-            const lastTime = laneLastTime.get(note.lane) || -Infinity;
-            const timeDiff = note.time - lastTime;
+            const lastTime = laneLastTime.get(note.lane) || -1000;
+            const minGap = note.type === 'hold' ? 50 : config.CHART.MIN_NOTE_SPACING;
             
-            // Minimum 50ms between notes in same lane
-            if (timeDiff >= 50) {
-                filtered.push(note);
-                laneLastTime.set(note.lane, note.time);
+            if (note.time - lastTime >= minGap) {
+                cleanNotes.push(note);
+                laneLastTime.set(note.lane, note.endTime || note.time);
             }
         }
         
-        return filtered;
-    }
-
-    /**
-     * Reduce note density for easier difficulties
-     */
-    reduceDensity(notes, multiplier) {
-        if (multiplier >= 1.0) return notes;
-        
-        const targetCount = Math.floor(notes.length * multiplier);
-        const filtered = [];
-        
-        // Keep notes with higher velocity and better spacing
-        const scored = notes.map(note => ({
-            note,
-            score: (note.velocity || 64) + (note.type === 'hold' ? 20 : 0)
-        }));
-        
-        scored.sort((a, b) => b.score - a.score);
-        
-        for (let i = 0; i < Math.min(targetCount, scored.length); i++) {
-            filtered.push(scored[i].note);
-        }
-        
-        return filtered.sort((a, b) => a.time - b.time);
-    }
-
-    /**
-     * Smooth out sudden difficulty spikes
-     */
-    smoothDifficultySpikes(notes) {
-        const windowSize = 2000; // 2 second window
-        const maxNotesPerWindow = 8; // Max notes per 2 seconds
-        
-        const smoothed = [];
-        let windowStart = 0;
-        
-        for (const note of notes) {
-            // Count notes in current window
-            const windowNotes = smoothed.filter(n => 
-                note.time - n.time <= windowSize
-            );
-            
-            if (windowNotes.length < maxNotesPerWindow) {
-                smoothed.push(note);
-            } else {
-                // Skip this note to avoid spike
-                continue;
-            }
-        }
-        
-        return smoothed;
-    }
-
-    /**
-     * Ensure minimum spacing between all notes
-     */
-    enforceMinimumSpacing(notes) {
-        const minSpacing = config.CHART.MIN_NOTE_SPACING;
-        const spaced = [];
-        let lastTime = -Infinity;
-        
-        for (const note of notes) {
-            if (note.time - lastTime >= minSpacing) {
-                spaced.push(note);
-                lastTime = note.time;
-            }
-        }
-        
-        return spaced;
+        return cleanNotes;
     }
 
     /**
@@ -703,9 +694,25 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Get available tracks with MIDI data
+     * Get list of available tracks
      */
     getAvailableTracks() {
         return Array.from(this.trackMidiData.keys());
+    }
+
+    /**
+     * Get MIDI file information for debugging
+     */
+    getMidiInfo(trackId) {
+        const midiData = this.trackMidiData.get(trackId);
+        if (!midiData) return null;
+        
+        return {
+            trackCount: midiData.tracks.length,
+            ticksPerQuarter: midiData.ticksPerQuarter,
+            tempoChanges: midiData.tempoMap.length,
+            timeSignatureChanges: midiData.timeSignatureMap.length,
+            totalEvents: midiData.tracks.reduce((sum, track) => sum + track.length, 0)
+        };
     }
 }
