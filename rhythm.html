@@ -885,10 +885,10 @@
             if (app.playback) {
                 app.playback.unlockControls();
             }
-            stopGameLoop();
             if (app.timingClock) {
                 app.timingClock.reset();
             }
+            stopGameLoop();
         });
 
         // Initialize the game when page loads
