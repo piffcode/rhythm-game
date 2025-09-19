@@ -647,32 +647,29 @@
             };
             
             // Native playback event handlers
-            app.playback.onTrackChange = async (track) => {
-                try {
-                    console.log(`Track changed: ${track.name}`);
-                    
-                    // Reset and start timing clock for new track
-                    app.timingClock.reset();
-                    app.timingClock.start();
-                    
-                    // Get audio analysis with timeout
-                    const analysis = await Promise.race([
-                        app.client.getAudioAnalysis(track.id),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Audio analysis timeout')), 8000)
-                        )
-                    ]);
-                    
-                    await app.engine.startTrack(track, analysis);
-                } catch (error) {
-                    console.error('Failed to get audio analysis:', error);
-                    // Continue with a fallback chart
-                    const chartGenerator = new ChartGenerator();
-                    const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
-                    app.engine.startTrackWithChart(track, fallbackChart);
-                }
-            };
-
+           app.playback.onTrackChange = async (track) => {
+    try {
+        console.log(`Track changed: ${track.name}`);
+        console.log('About to start track in game engine with MIDI only');
+        
+        // Reset and start timing clock for new track
+        app.timingClock.reset();
+        app.timingClock.start();
+        
+        // Only use MIDI - no audio analysis
+        await app.engine.startTrack(track, null); // Pass null for audio analysis
+        console.log('Track started successfully with MIDI');
+        
+    } catch (error) {
+        console.error('Failed to start track with MIDI:', error);
+        // If MIDI fails, you could either:
+        // 1. Skip the track, or 
+        // 2. Use a test chart as fallback
+        const chartGenerator = new ChartGenerator();
+        const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
+        app.engine.startTrackWithChart(track, fallbackChart);
+    }
+};
             app.playback.onStateChange = (state) => {
                 // Sync timing clock with playback state
                 if (state.is_playing && app.timingClock.isPaused) {
