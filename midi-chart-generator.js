@@ -1,4 +1,4 @@
-// midi-chart-generator.js - Generate rhythm game charts from MIDI files
+// improved-midi-chart-generator.js - Generate rhythm game charts from MIDI with precise timing
 
 import { config } from './config.js';
 
@@ -200,6 +200,7 @@ export class MidiChartGenerator {
                         (dataView.getUint8(offset + 3 + lengthBytes) << 8) |
                         dataView.getUint8(offset + 4 + lengthBytes);
                     event.tempo = 60000000 / microsecondsPerQuarter; // BPM
+                    event.microsecondsPerQuarter = microsecondsPerQuarter;
                 }
                 break;
                 
@@ -282,7 +283,7 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Generate rhythm game chart from MIDI data
+     * Generate rhythm game chart from MIDI data with improved timing
      */
     generateChartFromMidi(trackId, difficulty = 'NORMAL') {
         const midiData = this.trackMidiData.get(trackId);
@@ -299,14 +300,18 @@ export class MidiChartGenerator {
         const noteEvents = this.extractNoteEvents(midiData);
         const tempoMap = this.extractTempoMap(midiData);
 
-        // Convert MIDI ticks to milliseconds
-        const timedNotes = this.convertTicksToTime(noteEvents, tempoMap, midiData.ticksPerQuarter);
+        console.log(`Found ${noteEvents.length} note events and ${tempoMap.length} tempo changes`);
 
-        // Generate rhythm game notes
-        const gameNotes = this.convertToGameNotes(timedNotes, lanes, difficulty);
+        // Convert MIDI ticks to precise milliseconds
+        const timedNotes = this.convertTicksToTimeAdvanced(noteEvents, tempoMap, midiData.ticksPerQuarter);
 
-        // Apply difficulty-specific filtering
-        const finalNotes = this.applyDifficultyFilter(gameNotes, difficulty);
+        console.log(`Converted to ${timedNotes.length} timed notes`);
+
+        // Generate rhythm game notes with better mapping
+        const gameNotes = this.convertToGameNotesAdvanced(timedNotes, lanes, difficulty);
+
+        // Apply difficulty-specific filtering and optimization
+        const finalNotes = this.optimizeChart(gameNotes, difficulty);
 
         const chart = {
             notes: finalNotes,
@@ -317,7 +322,9 @@ export class MidiChartGenerator {
                 holdNotes: finalNotes.filter(n => n.type === 'hold').length,
                 source: 'midi',
                 trackId: trackId,
-                generatedAt: Date.now()
+                generatedAt: Date.now(),
+                tempoChanges: tempoMap.length,
+                originalMidiNotes: noteEvents.length
             }
         };
 
@@ -344,7 +351,7 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Extract tempo changes from MIDI data
+     * Extract tempo changes from MIDI data with defaults
      */
     extractTempoMap(midiData) {
         const tempoEvents = [];
@@ -354,7 +361,8 @@ export class MidiChartGenerator {
                 if (event.type === 'meta' && event.metaType === 0x51 && event.tempo) {
                     tempoEvents.push({
                         time: event.time,
-                        tempo: event.tempo
+                        tempo: event.tempo,
+                        microsecondsPerQuarter: event.microsecondsPerQuarter || (60000000 / event.tempo)
                     });
                 }
             }
@@ -362,67 +370,99 @@ export class MidiChartGenerator {
         
         // Add default tempo if none found
         if (tempoEvents.length === 0) {
-            tempoEvents.push({ time: 0, tempo: 120 });
+            tempoEvents.push({ 
+                time: 0, 
+                tempo: 120, 
+                microsecondsPerQuarter: 500000 // 120 BPM = 500,000 microseconds per quarter note
+            });
         }
         
         return tempoEvents.sort((a, b) => a.time - b.time);
     }
 
     /**
-     * Convert MIDI ticks to milliseconds
+     * Convert MIDI ticks to milliseconds with improved precision
      */
-    convertTicksToTime(noteEvents, tempoMap, ticksPerQuarter) {
+    convertTicksToTimeAdvanced(noteEvents, tempoMap, ticksPerQuarter) {
         const timedNotes = [];
-        let currentTempo = tempoMap[0]?.tempo || 120;
-        let tempoIndex = 0;
+        let currentTempoIndex = 0;
+        let currentTempo = tempoMap[0];
+        let cumulativeMs = 0;
+        let lastTickTime = 0;
         
-        for (const note of noteEvents) {
-            // Update tempo if needed
-            while (tempoIndex + 1 < tempoMap.length && 
-                   note.time >= tempoMap[tempoIndex + 1].time) {
-                tempoIndex++;
-                currentTempo = tempoMap[tempoIndex].tempo;
+        // Build a comprehensive time map
+        const timeMap = new Map();
+        
+        // Create sorted list of all timing events
+        const allEvents = [...noteEvents, ...tempoMap].sort((a, b) => a.time - b.time);
+        
+        for (const event of allEvents) {
+            const tickTime = event.time;
+            
+            // Update tempo if we've hit a tempo change
+            while (currentTempoIndex + 1 < tempoMap.length && 
+                   tickTime >= tempoMap[currentTempoIndex + 1].time) {
+                // Calculate time elapsed at current tempo
+                const tickDelta = tempoMap[currentTempoIndex + 1].time - lastTickTime;
+                const msDelta = (tickDelta / ticksPerQuarter) * (currentTempo.microsecondsPerQuarter / 1000);
+                cumulativeMs += msDelta;
+                
+                lastTickTime = tempoMap[currentTempoIndex + 1].time;
+                currentTempoIndex++;
+                currentTempo = tempoMap[currentTempoIndex];
             }
             
-            // Convert ticks to milliseconds
-            const ticksPerSecond = (currentTempo * ticksPerQuarter) / 60;
-            const timeMs = (note.time / ticksPerSecond) * 1000;
+            // Calculate time for this event
+            const tickDelta = tickTime - lastTickTime;
+            const msDelta = (tickDelta / ticksPerQuarter) * (currentTempo.microsecondsPerQuarter / 1000);
+            const eventTimeMs = cumulativeMs + msDelta;
             
-            timedNotes.push({
-                ...note,
-                timeMs: Math.round(timeMs)
-            });
+            // Store in time map for quick lookup
+            if (!timeMap.has(tickTime)) {
+                timeMap.set(tickTime, Math.round(eventTimeMs * 100) / 100); // Round to 0.01ms precision
+            }
+            
+            // If this is a note event, convert it
+            if (event.eventType === 'noteOn' || event.eventType === 'noteOff') {
+                timedNotes.push({
+                    ...event,
+                    timeMs: timeMap.get(tickTime)
+                });
+            }
         }
         
-        return timedNotes;
+        return timedNotes.sort((a, b) => a.timeMs - b.timeMs);
     }
 
     /**
-     * Convert MIDI notes to rhythm game notes
+     * Convert MIDI notes to rhythm game notes with advanced mapping
      */
-    convertToGameNotes(timedNotes, laneCount, difficulty) {
+    convertToGameNotesAdvanced(timedNotes, laneCount, difficulty) {
         const gameNotes = [];
         const activeNotes = new Map(); // Track held notes
         
-        // Group notes by pitch for lane assignment
-        const pitchToLane = this.createPitchMapping(timedNotes, laneCount);
+        // Analyze note patterns for intelligent lane assignment
+        const noteAnalysis = this.analyzeNotePatterns(timedNotes);
+        const laneMapper = this.createAdvancedLaneMapper(noteAnalysis, laneCount);
         
         for (const midiNote of timedNotes) {
-            const lane = pitchToLane.get(midiNote.note);
-            if (lane === undefined) continue; // Skip unmapped notes
+            const lane = laneMapper.getLane(midiNote);
+            if (lane === -1) continue; // Skip unmapped notes
             
             if (midiNote.eventType === 'noteOn') {
-                // Start of a note
                 const gameNote = {
                     time: midiNote.timeMs,
                     lane: lane,
                     type: 'tap',
                     velocity: midiNote.velocity,
-                    pitch: midiNote.note
+                    pitch: midiNote.note,
+                    channel: midiNote.channel,
+                    originalTick: midiNote.time // Keep original tick for debugging
                 };
                 
                 // Track this note for potential hold conversion
-                activeNotes.set(`${midiNote.note}_${lane}`, {
+                const noteKey = `${midiNote.note}_${midiNote.channel}`;
+                activeNotes.set(noteKey, {
                     gameNote: gameNote,
                     startTime: midiNote.timeMs
                 });
@@ -431,14 +471,16 @@ export class MidiChartGenerator {
                 
             } else if (midiNote.eventType === 'noteOff') {
                 // End of a note - convert to hold if long enough
-                const noteKey = `${midiNote.note}_${lane}`;
+                const noteKey = `${midiNote.note}_${midiNote.channel}`;
                 const activeNote = activeNotes.get(noteKey);
                 
                 if (activeNote) {
                     const duration = midiNote.timeMs - activeNote.startTime;
                     
-                    if (duration >= config.CHART.HOLD_MIN_DURATION) {
-                        // Convert to hold note
+                    // More lenient hold note detection for rhythm games
+                    const minHoldDuration = Math.max(200, config.CHART.HOLD_MIN_DURATION * 0.6);
+                    
+                    if (duration >= minHoldDuration) {
                         activeNote.gameNote.type = 'hold';
                         activeNote.gameNote.endTime = midiNote.timeMs;
                         activeNote.gameNote.duration = duration;
@@ -453,71 +495,204 @@ export class MidiChartGenerator {
     }
 
     /**
-     * Create mapping from MIDI pitches to game lanes
+     * Analyze MIDI note patterns for better lane assignment
      */
-    createPitchMapping(timedNotes, laneCount) {
-        // Count note frequency by pitch
-        const pitchCounts = new Map();
+    analyzeNotePatterns(timedNotes) {
+        const pitchFrequency = new Map();
+        const channelFrequency = new Map();
+        const velocityDistribution = new Map();
+        const timeIntervals = [];
+        
+        let lastTime = 0;
         
         for (const note of timedNotes) {
             if (note.eventType === 'noteOn') {
-                pitchCounts.set(note.note, (pitchCounts.get(note.note) || 0) + 1);
+                // Pitch frequency
+                pitchFrequency.set(note.note, (pitchFrequency.get(note.note) || 0) + 1);
+                
+                // Channel frequency
+                channelFrequency.set(note.channel, (channelFrequency.get(note.channel) || 0) + 1);
+                
+                // Velocity distribution
+                const velBucket = Math.floor(note.velocity / 16) * 16;
+                velocityDistribution.set(velBucket, (velocityDistribution.get(velBucket) || 0) + 1);
+                
+                // Time intervals
+                if (lastTime > 0) {
+                    timeIntervals.push(note.timeMs - lastTime);
+                }
+                lastTime = note.timeMs;
             }
         }
         
-        // Sort pitches by frequency (most common first)
-        const sortedPitches = Array.from(pitchCounts.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, laneCount * 2); // Take more than we need for variety
-        
-        // Assign to lanes, spreading across the range
-        const pitchToLane = new Map();
-        
-        for (let i = 0; i < Math.min(sortedPitches.length, laneCount * 2); i++) {
-            const pitch = sortedPitches[i][0];
-            const lane = i % laneCount;
-            pitchToLane.set(pitch, lane);
-        }
-        
-        return pitchToLane;
+        return {
+            pitchFrequency,
+            channelFrequency,
+            velocityDistribution,
+            averageInterval: timeIntervals.length > 0 ? 
+                timeIntervals.reduce((a, b) => a + b, 0) / timeIntervals.length : 0
+        };
     }
 
     /**
-     * Apply difficulty-specific filtering
+     * Create advanced lane mapper based on note analysis
      */
-    applyDifficultyFilter(notes, difficulty) {
-        const densityMultiplier = config.CHART.DENSITY_MULTIPLIERS[difficulty];
+    createAdvancedLaneMapper(analysis, laneCount) {
+        const { pitchFrequency, channelFrequency } = analysis;
         
-        if (densityMultiplier >= 1.0) {
-            return notes; // No filtering needed
+        // Sort pitches by frequency and assign to lanes strategically
+        const sortedPitches = Array.from(pitchFrequency.entries())
+            .sort((a, b) => b[1] - a[1]);
+        
+        const pitchToLane = new Map();
+        const channelToLanePreference = new Map();
+        
+        // Primary lane assignment based on frequency
+        for (let i = 0; i < Math.min(sortedPitches.length, laneCount * 3); i++) {
+            const pitch = sortedPitches[i][0];
+            const preferredLane = i % laneCount;
+            pitchToLane.set(pitch, preferredLane);
         }
         
-        // Filter notes based on difficulty
-        const filteredNotes = [];
-        const minSpacing = config.CHART.MIN_NOTE_SPACING / densityMultiplier;
+        // Channel-based lane preferences (for drums/percussion)
+        Array.from(channelFrequency.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, laneCount)
+            .forEach(([channel], index) => {
+                channelToLanePreference.set(channel, index);
+            });
         
-        for (let i = 0; i < notes.length; i++) {
-            const note = notes[i];
+        return {
+            getLane: (midiNote) => {
+                // Try pitch-based mapping first
+                if (pitchToLane.has(midiNote.note)) {
+                    return pitchToLane.get(midiNote.note);
+                }
+                
+                // Fallback to channel-based mapping
+                if (channelToLanePreference.has(midiNote.channel)) {
+                    return channelToLanePreference.get(midiNote.channel);
+                }
+                
+                // Final fallback: distribute by pitch range
+                const laneIndex = Math.floor(((midiNote.note - 21) / (108 - 21)) * laneCount);
+                return Math.max(0, Math.min(laneCount - 1, laneIndex));
+            }
+        };
+    }
+
+    /**
+     * Optimize chart for better playability
+     */
+    optimizeChart(notes, difficulty) {
+        const densityMultiplier = config.CHART.DENSITY_MULTIPLIERS[difficulty];
+        let optimizedNotes = [...notes];
+        
+        // Remove notes that are too close together
+        optimizedNotes = this.removeOverlappingNotes(optimizedNotes);
+        
+        // Apply difficulty scaling
+        if (densityMultiplier < 1.0) {
+            optimizedNotes = this.reduceDensity(optimizedNotes, densityMultiplier);
+        }
+        
+        // Smooth out difficulty spikes
+        optimizedNotes = this.smoothDifficultySpikes(optimizedNotes);
+        
+        // Ensure minimum spacing
+        optimizedNotes = this.enforceMinimumSpacing(optimizedNotes);
+        
+        return optimizedNotes.sort((a, b) => a.time - b.time);
+    }
+
+    /**
+     * Remove overlapping notes in the same lane
+     */
+    removeOverlappingNotes(notes) {
+        const laneLastTime = new Map();
+        const filtered = [];
+        
+        for (const note of notes) {
+            const lastTime = laneLastTime.get(note.lane) || -Infinity;
+            const timeDiff = note.time - lastTime;
             
-            // Always include first note
-            if (i === 0) {
-                filteredNotes.push(note);
+            // Minimum 50ms between notes in same lane
+            if (timeDiff >= 50) {
+                filtered.push(note);
+                laneLastTime.set(note.lane, note.time);
+            }
+        }
+        
+        return filtered;
+    }
+
+    /**
+     * Reduce note density for easier difficulties
+     */
+    reduceDensity(notes, multiplier) {
+        if (multiplier >= 1.0) return notes;
+        
+        const targetCount = Math.floor(notes.length * multiplier);
+        const filtered = [];
+        
+        // Keep notes with higher velocity and better spacing
+        const scored = notes.map(note => ({
+            note,
+            score: (note.velocity || 64) + (note.type === 'hold' ? 20 : 0)
+        }));
+        
+        scored.sort((a, b) => b.score - a.score);
+        
+        for (let i = 0; i < Math.min(targetCount, scored.length); i++) {
+            filtered.push(scored[i].note);
+        }
+        
+        return filtered.sort((a, b) => a.time - b.time);
+    }
+
+    /**
+     * Smooth out sudden difficulty spikes
+     */
+    smoothDifficultySpikes(notes) {
+        const windowSize = 2000; // 2 second window
+        const maxNotesPerWindow = 8; // Max notes per 2 seconds
+        
+        const smoothed = [];
+        let windowStart = 0;
+        
+        for (const note of notes) {
+            // Count notes in current window
+            const windowNotes = smoothed.filter(n => 
+                note.time - n.time <= windowSize
+            );
+            
+            if (windowNotes.length < maxNotesPerWindow) {
+                smoothed.push(note);
+            } else {
+                // Skip this note to avoid spike
                 continue;
             }
-            
-            // Check spacing with previous note
-            const lastNote = filteredNotes[filteredNotes.length - 1];
-            const timeDiff = note.time - lastNote.time;
-            
-            if (timeDiff >= minSpacing) {
-                filteredNotes.push(note);
-            } else if (note.type === 'hold' || note.velocity > 100) {
-                // Keep hold notes and high velocity notes even if close
-                filteredNotes.push(note);
+        }
+        
+        return smoothed;
+    }
+
+    /**
+     * Ensure minimum spacing between all notes
+     */
+    enforceMinimumSpacing(notes) {
+        const minSpacing = config.CHART.MIN_NOTE_SPACING;
+        const spaced = [];
+        let lastTime = -Infinity;
+        
+        for (const note of notes) {
+            if (note.time - lastTime >= minSpacing) {
+                spaced.push(note);
+                lastTime = note.time;
             }
         }
         
-        return filteredNotes;
+        return spaced;
     }
 
     /**
