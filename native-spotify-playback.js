@@ -1,6 +1,6 @@
 // native-spotify-playback.js - Control user's native Spotify app instead of web player
 
-import { config } from '../config.js';
+import { config } from './config.js';
 
 export class NativeSpotifyPlayback {
     constructor(client) {
