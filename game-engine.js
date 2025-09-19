@@ -1,126 +1,49 @@
-// Update your game-engine.js to use MIDI charts
+// improved-game-engine.js - Game engine with better MIDI timing and synchronization
 
 import { config, generateCompletionCode } from './config.js';
 import { MidiChartGenerator } from './midi-chart-generator.js';
+import { ChartGenerator } from './game-chart.js';
 
 export class GameEngine {
     constructor() {
         // Game state
-        this.isInitialized = false;
-        this.isPlaying = false;
-        this.isPaused = false;
-        this.difficulty = 'NORMAL';
-        
-        // MIDI chart generator
-        this.midiGenerator = new MidiChartGenerator();
-        
-        // Session data
-        this.sessionId = null;
-        this.userId = null;
-        this.tracks = [];
-        this.currentTrackIndex = 0;
-        this.trackResults = [];
-        
-        // Current track data
-        this.currentChart = null;
-        this.currentTrack = null;
-        this.trackStartTime = 0;
-        this.trackDuration = 0;
-        this.requiredPercent = 0;
-        
-        // Score and combo
-        this.score = 0;
-        this.combo = 0;
-        this.maxCombo = 0;
-        this.health = config.HEALTH.STARTING;
-        
-        // Hit statistics
-        this.hitStats = {
-            perfect: 0,
-            great: 0,
-            good: 0,
-            miss: 0,
-            total: 0
-        };
-        
-        // Note tracking
-        this.activeNotes = [];
-        this.nextNoteIndex = 0;
-        this.hitNotes = new Set();
-        
-        // Timing
-        this.gameTime = 0;
-        this.lastUpdateTime = 0;
-        this.positionOffset = 0;
-        
-        // Performance tracking
-        this.frameCount = 0;
-        this.lastFpsTime = 0;
-        this.currentFps = 60;
-        
-        // Event callbacks
-        this.onTrackStart = null;
-        this.onTrackEnd = null;
-        this.onSessionComplete = null;
-        this.onScoreUpdate = null;
-        this.onHealthUpdate = null;
-    }
-
-    /**
-     * Initialize a new game session
-     */
-    initializeSession(tracks, userId, sessionId) {
-        this.tracks = tracks;
-        this.userId = userId;
-        this.sessionId = sessionId;
-        this.currentTrackIndex = 0;
-        this.trackResults = [];
-        
-        // Reset session stats
-        this.score = 0;
-        this.combo = 0;
-        this.maxCombo = 0;
-        this.health = config.HEALTH.STARTING;
-        this.hitStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        
         this.isInitialized = true;
         console.log('Game session initialized with', tracks.length, 'tracks');
     }
 
     /**
-     * Start a new track using MIDI chart if available
+     * Start a new track with improved timing synchronization
      */
     async startTrack(trackData, audioAnalysis = null) {
         this.currentTrack = trackData;
         this.trackDuration = trackData.duration_ms;
-        this.trackStartTime = Date.now();
         this.requiredPercent = this.getRandomPassThreshold();
         
-        // Try to generate chart from MIDI first
-        if (this.midiGenerator.hasMidiData(trackData.id)) {
-            console.log(`Using MIDI chart for track: ${trackData.name}`);
-            this.currentChart = this.midiGenerator.generateChartFromMidi(trackData.id, this.difficulty);
-        } else if (audioAnalysis) {
-            // Fallback to audio analysis
-            console.log(`Using audio analysis chart for track: ${trackData.name}`);
-            const chartGenerator = new ChartGenerator();
-            this.currentChart = chartGenerator.generateChart(audioAnalysis, this.difficulty);
-        } else {
-            // Ultimate fallback to test chart
-            console.log(`Using test chart for track: ${trackData.name}`);
-            const chartGenerator = new ChartGenerator();
-            this.currentChart = chartGenerator.generateTestChart(this.trackDuration, this.difficulty);
+        // Reset timing for new track
+        this.gameStartTime = performance.now();
+        this.audioStartTime = 0; // Will be set when audio actually starts
+        this.lastPositionSync = 0;
+        
+        // Try MIDI chart first, then audio analysis, then fallback
+        try {
+            if (this.midiGenerator.hasMidiData(trackData.id)) {
+                console.log(`Using MIDI chart for track: ${trackData.name}`);
+                this.currentChart = this.midiGenerator.generateChartFromMidi(trackData.id, this.difficulty);
+            } else if (audioAnalysis) {
+                console.log(`Using audio analysis chart for track: ${trackData.name}`);
+                this.currentChart = this.audioChartGenerator.generateChart(audioAnalysis, this.difficulty);
+            } else {
+                console.log(`Using fallback test chart for track: ${trackData.name}`);
+                this.currentChart = this.audioChartGenerator.generateTestChart(this.trackDuration, this.difficulty);
+            }
+        } catch (error) {
+            console.error('Chart generation failed:', error);
+            // Ultimate fallback
+            this.currentChart = this.audioChartGenerator.generateTestChart(this.trackDuration, this.difficulty);
         }
         
         // Reset track-specific state
-        this.activeNotes = [];
-        this.nextNoteIndex = 0;
-        this.hitNotes.clear();
-        this.positionOffset = 0;
-        
-        // Reset per-track stats (keep session stats)
-        const trackStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        this.trackStats = trackStats;
+        this.resetTrackState();
         
         this.isPlaying = true;
         
@@ -132,92 +55,127 @@ export class GameEngine {
     }
 
     /**
-     * Start track with pre-generated chart (fallback method)
+     * Reset state for new track
      */
-    async startTrackWithChart(trackData, chart) {
-        this.currentTrack = trackData;
-        this.trackDuration = trackData.duration_ms;
-        this.trackStartTime = Date.now();
-        this.requiredPercent = this.getRandomPassThreshold();
-        
-        // Use provided chart
-        this.currentChart = chart;
-        
-        // Reset track-specific state
+    resetTrackState() {
         this.activeNotes = [];
         this.nextNoteIndex = 0;
         this.hitNotes.clear();
-        this.positionOffset = 0;
         
         // Reset per-track stats
-        const trackStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        this.trackStats = trackStats;
+        this.trackStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
         
-        this.isPlaying = true;
+        // Clear timing accuracy history
+        this.timingAccuracy = [];
+    }
+
+    /**
+     * Synchronize game time with audio playback
+     */
+    syncWithAudioTime(audioPositionMs) {
+        const now = performance.now();
         
-        console.log(`Started track with provided chart: ${trackData.name} (${this.requiredPercent}% required)`);
-        
-        if (this.onTrackStart) {
-            this.onTrackStart(trackData, this.requiredPercent);
+        if (this.audioStartTime === 0) {
+            // First sync - establish baseline
+            this.audioStartTime = now - audioPositionMs;
+            this.lastPositionSync = now;
+        } else {
+            // Check for drift and resync if necessary
+            const expectedAudioTime = now - this.audioStartTime;
+            const drift = Math.abs(expectedAudioTime - audioPositionMs);
+            
+            if (drift > 100) { // More than 100ms drift
+                console.log(`Audio drift detected: ${drift.toFixed(0)}ms, resyncing...`);
+                this.audioStartTime = now - audioPositionMs;
+            }
+            
+            this.lastPositionSync = now;
         }
     }
 
     /**
-     * Get random pass threshold
+     * Get current game time with high precision
      */
-    getRandomPassThreshold() {
-        const min = config.PASS_THRESHOLD.MIN;
-        const max = config.PASS_THRESHOLD.MAX;
-        return Math.floor(Math.random() * (max - min + 1)) + min;
+    getCurrentGameTime() {
+        if (this.audioStartTime === 0) {
+            return 0;
+        }
+        
+        const elapsed = performance.now() - this.audioStartTime;
+        return elapsed + this.timingOffset;
     }
 
     /**
-     * Main update loop - same as before
+     * Set timing calibration offset
      */
-    update(deltaTime, currentPositionMs) {
+    setTimingOffset(offsetMs) {
+        this.timingOffset = offsetMs;
+        console.log(`Timing offset set to ${offsetMs}ms`);
+    }
+
+    /**
+     * Main update loop with improved timing
+     */
+    update(deltaTime, audioPositionMs = null) {
         if (!this.isInitialized || !this.isPlaying) return;
         
         this.updatePerformanceMetrics(deltaTime);
         
-        // Update game time
-        this.gameTime = currentPositionMs;
+        // Sync with audio position if provided
+        if (audioPositionMs !== null) {
+            this.syncWithAudioTime(audioPositionMs);
+        }
         
-        // Spawn new notes
-        this.spawnNotes();
+        // Get current game time
+        const gameTime = this.getCurrentGameTime();
+        
+        // Spawn new notes with lookahead
+        this.spawnNotes(gameTime);
         
         // Update active notes
-        this.updateNotes(deltaTime);
+        this.updateNotes(gameTime, deltaTime);
         
         // Check for missed notes
-        this.checkMissedNotes();
+        this.checkMissedNotes(gameTime);
         
         // Check for track completion
-        this.checkTrackCompletion();
+        this.checkTrackCompletion(gameTime);
         
-        this.lastUpdateTime = Date.now();
+        // Update timing callback if available
+        if (this.onTimingUpdate) {
+            this.onTimingUpdate({
+                gameTime: gameTime,
+                audioTime: audioPositionMs,
+                drift: audioPositionMs ? Math.abs(gameTime - audioPositionMs) : 0,
+                offset: this.timingOffset
+            });
+        }
     }
 
     /**
-     * Spawn notes that should appear on screen
+     * Spawn notes with improved lookahead
      */
-    spawnNotes() {
+    spawnNotes(gameTime) {
         if (!this.currentChart) return;
         
         const approachTime = config.DIFFICULTY_SETTINGS[this.difficulty].approachTime;
-        const spawnTime = this.gameTime + approachTime;
+        const spawnTime = gameTime + this.noteSpawnLookahead;
         
-        // Spawn notes that should appear now
         while (this.nextNoteIndex < this.currentChart.notes.length) {
             const note = this.currentChart.notes[this.nextNoteIndex];
             
             if (note.time <= spawnTime) {
-                this.activeNotes.push({
+                // Create active note with precise timing
+                const activeNote = {
                     ...note,
                     id: this.nextNoteIndex,
                     spawned: true,
-                    y: 0,
-                    isHit: false
-                });
+                    spawnTime: gameTime,
+                    isHit: false,
+                    progress: 0
+                };
+                
+                this.activeNotes.push(activeNote);
                 this.nextNoteIndex++;
             } else {
                 break;
@@ -226,37 +184,42 @@ export class GameEngine {
     }
 
     /**
-     * Update positions of active notes
+     * Update note positions and states
      */
-    updateNotes(deltaTime) {
+    updateNotes(gameTime, deltaTime) {
         const approachTime = config.DIFFICULTY_SETTINGS[this.difficulty].approachTime;
         
-        // Remove notes that have passed the hit line and weren't hit
+        // Update positions and remove old notes
         this.activeNotes = this.activeNotes.filter(note => {
-            const timeDiff = note.time - this.gameTime;
-            return timeDiff > -config.TIMING_WINDOWS.GOOD || note.isHit;
-        });
-        
-        // Update note positions
-        this.activeNotes.forEach(note => {
-            const timeDiff = note.time - this.gameTime;
-            const progress = 1 - (timeDiff / approachTime);
-            note.progress = Math.max(0, Math.min(1, progress));
+            const timeDiff = note.time - gameTime;
+            const missWindow = config.TIMING_WINDOWS.GOOD;
+            
+            // Remove notes that are too far past
+            if (timeDiff < -missWindow - 200) {
+                return false;
+            }
+            
+            // Calculate progress (0 = spawned, 1 = at hit line)
+            const totalTime = this.noteSpawnLookahead;
+            const elapsed = gameTime - note.spawnTime;
+            note.progress = Math.max(0, Math.min(1, elapsed / totalTime));
+            
+            return true;
         });
     }
 
     /**
-     * Check for notes that were missed
+     * Check for missed notes with precise timing
      */
-    checkMissedNotes() {
+    checkMissedNotes(gameTime) {
         const missThreshold = config.TIMING_WINDOWS.GOOD;
         
         this.activeNotes.forEach(note => {
             if (!note.isHit && !this.hitNotes.has(note.id)) {
-                const timeDiff = this.gameTime - note.time;
+                const timeDiff = gameTime - note.time;
                 
                 if (timeDiff > missThreshold) {
-                    this.handleMiss(note);
+                    this.processHit(note, 'MISS', timeDiff);
                     this.hitNotes.add(note.id);
                     note.isHit = true;
                 }
@@ -265,19 +228,19 @@ export class GameEngine {
     }
 
     /**
-     * Handle player input for a lane
+     * Handle player input with precise timing analysis
      */
     handleLaneHit(laneIndex, inputTime = null) {
         if (!this.isPlaying) return null;
         
-        const hitTime = inputTime || this.gameTime;
+        const currentTime = inputTime || this.getCurrentGameTime();
         let bestNote = null;
         let bestTimeDiff = Infinity;
         
         // Find the best note to hit in this lane
         this.activeNotes.forEach(note => {
             if (note.lane === laneIndex && !note.isHit && !this.hitNotes.has(note.id)) {
-                const timeDiff = Math.abs(hitTime - note.time);
+                const timeDiff = Math.abs(currentTime - note.time);
                 
                 if (timeDiff < bestTimeDiff && timeDiff <= config.TIMING_WINDOWS.GOOD) {
                     bestNote = note;
@@ -287,17 +250,68 @@ export class GameEngine {
         });
         
         if (bestNote) {
-            const hitResult = this.calculateHitResult(bestTimeDiff);
-            this.processHit(bestNote, hitResult, bestTimeDiff);
+            // Calculate actual timing difference (positive = late, negative = early)
+            const actualTimeDiff = currentTime - bestNote.time;
+            const hitResult = this.calculateHitResult(Math.abs(actualTimeDiff));
+            
+            this.processHit(bestNote, hitResult, actualTimeDiff);
+            
+            // Track timing accuracy
+            this.recordTimingAccuracy(actualTimeDiff);
+            
             return {
                 hitType: hitResult,
                 score: this.calculateScoreGain(hitResult),
                 combo: this.combo,
+                timingDiff: actualTimeDiff,
                 note: bestNote
             };
         }
         
         return null;
+    }
+
+    /**
+     * Record timing accuracy for analysis
+     */
+    recordTimingAccuracy(timeDiff) {
+        this.timingAccuracy.push(timeDiff);
+        
+        if (this.timingAccuracy.length > this.maxTimingHistory) {
+            this.timingAccuracy.shift();
+        }
+    }
+
+    /**
+     * Get timing statistics
+     */
+    getTimingStats() {
+        if (this.timingAccuracy.length === 0) {
+            return { averageOffset: 0, standardDeviation: 0, accuracy: 0 };
+        }
+        
+        const sum = this.timingAccuracy.reduce((a, b) => a + b, 0);
+        const average = sum / this.timingAccuracy.length;
+        
+        const variance = this.timingAccuracy.reduce((sum, diff) => {
+            return sum + Math.pow(diff - average, 2);
+        }, 0) / this.timingAccuracy.length;
+        
+        const standardDeviation = Math.sqrt(variance);
+        
+        // Calculate accuracy as percentage of hits within perfect window
+        const perfectHits = this.timingAccuracy.filter(diff => 
+            Math.abs(diff) <= config.TIMING_WINDOWS.PERFECT
+        ).length;
+        
+        const accuracy = (perfectHits / this.timingAccuracy.length) * 100;
+        
+        return {
+            averageOffset: Math.round(average),
+            standardDeviation: Math.round(standardDeviation),
+            accuracy: Math.round(accuracy),
+            totalHits: this.timingAccuracy.length
+        };
     }
 
     /**
@@ -328,7 +342,7 @@ export class GameEngine {
     }
 
     /**
-     * Process a successful hit
+     * Process a hit with improved feedback
      */
     processHit(note, hitResult, timeDiff) {
         note.isHit = true;
@@ -361,18 +375,10 @@ export class GameEngine {
                 score: this.score,
                 combo: this.combo,
                 hitResult,
-                scoreGain
+                scoreGain,
+                timingDiff: timeDiff
             });
         }
-        
-        console.log(`Hit ${hitResult}: ${timeDiff}ms, Score: +${scoreGain}, Combo: ${this.combo}`);
-    }
-
-    /**
-     * Handle a missed note
-     */
-    handleMiss(note) {
-        this.processHit(note, 'MISS', Infinity);
     }
 
     /**
@@ -391,8 +397,7 @@ export class GameEngine {
                                      this.health + config.HEALTH.GREAT_GAIN);
                 break;
             case 'GOOD':
-                // Neutral
-                break;
+                break; // Neutral
             case 'MISS':
                 this.health = Math.max(config.HEALTH.MIN_HEALTH, 
                                      this.health - config.HEALTH.MISS_LOSS);
@@ -407,8 +412,8 @@ export class GameEngine {
     /**
      * Check if current track is complete
      */
-    checkTrackCompletion() {
-        const playedPercent = (this.gameTime / this.trackDuration) * 100;
+    checkTrackCompletion(gameTime) {
+        const playedPercent = (gameTime / this.trackDuration) * 100;
         
         if (playedPercent >= this.requiredPercent) {
             this.completeCurrentTrack();
@@ -416,17 +421,19 @@ export class GameEngine {
     }
 
     /**
-     * Complete the current track and advance to next
+     * Complete the current track
      */
     completeCurrentTrack() {
         if (!this.isPlaying) return;
         
         this.isPlaying = false;
         
-        // Calculate track results
-        const playedPercent = Math.min(100, (this.gameTime / this.trackDuration) * 100);
+        const gameTime = this.getCurrentGameTime();
+        const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
         const accuracy = this.trackStats.total > 0 ? 
             ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
+        
+        const timingStats = this.getTimingStats();
         
         const trackResult = {
             trackIndex: this.currentTrackIndex,
@@ -439,7 +446,8 @@ export class GameEngine {
             score: this.score,
             maxCombo: this.maxCombo,
             hitStats: { ...this.trackStats },
-            chartSource: this.currentChart?.metadata?.source || 'unknown'
+            chartSource: this.currentChart?.metadata?.source || 'unknown',
+            timingStats: timingStats
         };
         
         this.trackResults.push(trackResult);
@@ -450,23 +458,20 @@ export class GameEngine {
             this.onTrackEnd(trackResult);
         }
         
-        // Advance to next track or complete session
+        // Advance to next track
         this.currentTrackIndex++;
         if (this.currentTrackIndex >= this.tracks.length) {
             this.completeSession();
-        } else {
-            // Prepare for next track
-            setTimeout(() => {
-                this.isPlaying = true;
-            }, 1000);
         }
     }
 
     /**
-     * Complete the entire game session
+     * Complete the entire session
      */
     completeSession() {
         const completionCode = generateCompletionCode(this.userId, this.sessionId);
+        
+        const overallTimingStats = this.getTimingStats();
         
         const sessionResult = {
             completionCode,
@@ -475,6 +480,7 @@ export class GameEngine {
             totalMaxCombo: this.maxCombo,
             overallAccuracy: this.calculateOverallAccuracy(),
             sessionStats: { ...this.hitStats },
+            timingStats: overallTimingStats,
             midiTracksUsed: this.trackResults.filter(r => r.chartSource === 'midi').length
         };
         
@@ -486,7 +492,7 @@ export class GameEngine {
     }
 
     /**
-     * Calculate overall session accuracy
+     * Calculate overall accuracy
      */
     calculateOverallAccuracy() {
         if (this.hitStats.total === 0) return 0;
@@ -500,13 +506,23 @@ export class GameEngine {
      */
     updatePerformanceMetrics(deltaTime) {
         this.frameCount++;
-        const now = Date.now();
+        this.averageFrameTime = (this.averageFrameTime * 0.9) + (deltaTime * 0.1);
         
+        const now = Date.now();
         if (now - this.lastFpsTime >= 1000) {
             this.currentFps = this.frameCount;
             this.frameCount = 0;
             this.lastFpsTime = now;
         }
+    }
+
+    /**
+     * Get random pass threshold
+     */
+    getRandomPassThreshold() {
+        const min = config.PASS_THRESHOLD.MIN;
+        const max = config.PASS_THRESHOLD.MAX;
+        return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
     /**
@@ -525,9 +541,9 @@ export class GameEngine {
             requiredPercent: this.requiredPercent,
             
             // Timing
-            gameTime: this.gameTime,
+            gameTime: this.getCurrentGameTime(),
             trackDuration: this.trackDuration,
-            playedPercent: this.trackDuration > 0 ? (this.gameTime / this.trackDuration) * 100 : 0,
+            playedPercent: this.trackDuration > 0 ? (this.getCurrentGameTime() / this.trackDuration) * 100 : 0,
             
             // Score and stats
             score: this.score,
@@ -535,6 +551,7 @@ export class GameEngine {
             maxCombo: this.maxCombo,
             health: this.health,
             hitStats: { ...this.hitStats },
+            timingStats: this.getTimingStats(),
             
             // Notes
             activeNotes: [...this.activeNotes],
@@ -545,6 +562,7 @@ export class GameEngine {
             
             // Performance
             fps: this.currentFps,
+            averageFrameTime: this.averageFrameTime,
             
             // Chart info
             chartSource: this.currentChart?.metadata?.source || 'unknown',
@@ -553,25 +571,12 @@ export class GameEngine {
             // Debug info
             debug: config.DEBUG.ENABLED ? {
                 nextNoteIndex: this.nextNoteIndex,
-                totalNotes: this.currentChart?.notes.length || 0,
                 activeNotesCount: this.activeNotes.length,
-                midiAvailable: this.midiGenerator.hasMidiData(this.currentTrack?.id)
+                midiAvailable: this.midiGenerator.hasMidiData(this.currentTrack?.id),
+                timingOffset: this.timingOffset,
+                audioStartTime: this.audioStartTime
             } : null
         };
-    }
-
-    /**
-     * Check if MIDI data is available for current track
-     */
-    hasMidiForCurrentTrack() {
-        return this.currentTrack && this.midiGenerator.hasMidiData(this.currentTrack.id);
-    }
-
-    /**
-     * Get list of tracks with MIDI data
-     */
-    getTracksWithMidi() {
-        return this.midiGenerator.getAvailableTracks();
     }
 
     /**
@@ -609,9 +614,9 @@ export class GameEngine {
         this.health = config.HEALTH.STARTING;
         
         this.hitStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        this.activeNotes = [];
-        this.nextNoteIndex = 0;
-        this.hitNotes.clear();
+        this.timingAccuracy = [];
+        
+        this.resetTrackState();
         
         console.log('Game engine reset');
     }
@@ -625,4 +630,104 @@ export class GameEngine {
             console.log('Difficulty set to:', difficulty);
         }
     }
-}
+
+    /**
+     * Check if MIDI data is available for current track
+     */
+    hasMidiForCurrentTrack() {
+        return this.currentTrack && this.midiGenerator.hasMidiData(this.currentTrack.id);
+    }
+
+    /**
+     * Get tracks with MIDI data
+     */
+    getTracksWithMidi() {
+        return this.midiGenerator.getAvailableTracks();
+    }
+}d = false;
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.difficulty = 'NORMAL';
+        
+        // Chart generators
+        this.midiGenerator = new ImprovedMidiChartGenerator();
+        this.audioChartGenerator = new ChartGenerator();
+        
+        // Session data
+        this.sessionId = null;
+        this.userId = null;
+        this.tracks = [];
+        this.currentTrackIndex = 0;
+        this.trackResults = [];
+        
+        // Current track data
+        this.currentChart = null;
+        this.currentTrack = null;
+        this.trackStartTime = 0;
+        this.trackDuration = 0;
+        this.requiredPercent = 0;
+        
+        // Timing synchronization
+        this.gameStartTime = 0; // When the game timing started
+        this.audioStartTime = 0; // When audio started playing
+        this.timingOffset = 0; // User calibration offset
+        this.lastPositionSync = 0; // Last time we synced with audio position
+        
+        // Score and combo
+        this.score = 0;
+        this.combo = 0;
+        this.maxCombo = 0;
+        this.health = config.HEALTH.STARTING;
+        
+        // Hit statistics
+        this.hitStats = {
+            perfect: 0,
+            great: 0,
+            good: 0,
+            miss: 0,
+            total: 0
+        };
+        
+        // Note tracking with better precision
+        this.activeNotes = [];
+        this.nextNoteIndex = 0;
+        this.hitNotes = new Set();
+        this.noteSpawnLookahead = 2000; // ms to look ahead for spawning notes
+        
+        // Performance tracking
+        this.frameCount = 0;
+        this.lastFpsTime = 0;
+        this.currentFps = 60;
+        this.averageFrameTime = 16.67; // Target 60fps
+        
+        // Timing accuracy tracking
+        this.timingAccuracy = [];
+        this.maxTimingHistory = 100;
+        
+        // Event callbacks
+        this.onTrackStart = null;
+        this.onTrackEnd = null;
+        this.onSessionComplete = null;
+        this.onScoreUpdate = null;
+        this.onHealthUpdate = null;
+        this.onTimingUpdate = null; // New callback for timing info
+    }
+
+    /**
+     * Initialize a new game session
+     */
+    initializeSession(tracks, userId, sessionId) {
+        this.tracks = tracks;
+        this.userId = userId;
+        this.sessionId = sessionId;
+        this.currentTrackIndex = 0;
+        this.trackResults = [];
+        
+        // Reset session stats
+        this.score = 0;
+        this.combo = 0;
+        this.maxCombo = 0;
+        this.health = config.HEALTH.STARTING;
+        this.hitStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
+        
+        this.isInitialize
