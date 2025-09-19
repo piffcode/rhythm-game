@@ -294,6 +294,55 @@
             opacity: 0.9;
             max-width: 400px;
         }
+
+        .timing-debug {
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border-radius: 4px;
+            z-index: 200;
+            display: none;
+        }
+
+        .calibration-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 150;
+            text-align: center;
+            display: none;
+        }
+
+        .calibration-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .calibration-btn {
+            background: #1db954;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .calibration-btn:hover {
+            background: #1ed760;
+        }
     </style>
 </head>
 <body>
@@ -314,6 +363,26 @@
             </div>
             <div class="health-bar">
                 <div class="health-fill" id="healthFill"></div>
+            </div>
+        </div>
+        
+        <!-- Timing Debug (hidden by default) -->
+        <div class="timing-debug" id="timingDebug">
+            <div id="timingInfo">Timing Info</div>
+        </div>
+
+        <!-- Calibration Panel -->
+        <div class="calibration-panel" id="calibrationPanel">
+            <div>Audio Sync Calibration: <span id="calibrationValue">0</span>ms</div>
+            <div class="calibration-controls">
+                <button class="calibration-btn" onclick="adjustCalibration(-10)">-10ms</button>
+                <button class="calibration-btn" onclick="adjustCalibration(-1)">-1ms</button>
+                <button class="calibration-btn" onclick="resetCalibration()">Reset</button>
+                <button class="calibration-btn" onclick="adjustCalibration(1)">+1ms</button>
+                <button class="calibration-btn" onclick="adjustCalibration(10)">+10ms</button>
+            </div>
+            <div style="font-size: 11px; margin-top: 8px; opacity: 0.7;">
+                Tap - to make notes appear earlier, + to make them appear later
             </div>
         </div>
         
@@ -353,7 +422,7 @@
         import { config } from './config.js';
         import { PKCE } from './auth-pkce.js';
         import { SpotifyClient } from './spotify-client.js';
-        import { SpotifyPlayback } from './spotify-playback.js';
+        import { NativeSpotifyPlayback } from './native-spotify-playback.js'; // Changed from SpotifyPlayback
         import { GameEngine } from './game-engine.js';
         import { GameInput } from './game-input.js';
         import { GameRender } from './game-render.js';
@@ -370,12 +439,80 @@
             render: null,
             ui: null,
             isInitialized: false,
-            gameLoopId: null
+            gameLoopId: null,
+            timingClock: null // High precision timing
         };
+
+        // Timing calibration functions (global scope for HTML onclick)
+        window.adjustCalibration = function(delta) {
+            if (app.playback) {
+                const currentOffset = app.playback.calibrationOffset || 0;
+                const newOffset = currentOffset + delta;
+                app.playback.setCalibrationOffset(newOffset);
+                document.getElementById('calibrationValue').textContent = newOffset;
+            }
+        };
+
+        window.resetCalibration = function() {
+            if (app.playback) {
+                app.playback.setCalibrationOffset(0);
+                document.getElementById('calibrationValue').textContent = '0';
+            }
+        };
+
+        // High precision timing clock
+        class TimingClock {
+            constructor() {
+                this.startTime = null;
+                this.pausedTime = 0;
+                this.isPaused = false;
+                this.performanceOffset = 0; // Calibration for audio latency
+            }
+
+            start() {
+                this.startTime = performance.now();
+                this.pausedTime = 0;
+                this.isPaused = false;
+            }
+
+            pause() {
+                if (!this.isPaused && this.startTime) {
+                    this.isPaused = true;
+                    this.pausedTime = performance.now();
+                }
+            }
+
+            resume() {
+                if (this.isPaused && this.pausedTime > 0) {
+                    const pauseDuration = performance.now() - this.pausedTime;
+                    this.startTime += pauseDuration;
+                    this.isPaused = false;
+                    this.pausedTime = 0;
+                }
+            }
+
+            getTime() {
+                if (!this.startTime) return 0;
+                if (this.isPaused) {
+                    return this.pausedTime - this.startTime + this.performanceOffset;
+                }
+                return performance.now() - this.startTime + this.performanceOffset;
+            }
+
+            setCalibration(offsetMs) {
+                this.performanceOffset = offsetMs;
+            }
+
+            reset() {
+                this.startTime = null;
+                this.pausedTime = 0;
+                this.isPaused = false;
+            }
+        }
 
         // Progress tracking
         let initProgress = 0;
-        const initSteps = 8; // Total number of initialization steps
+        const initSteps = 7; // Reduced steps for native playback
 
         // Update progress display
         function updateProgress(step, message) {
@@ -408,68 +545,59 @@
                 
                 updateProgress(1, 'Connecting to Spotify...');
                 
-                // Initialize Spotify client with timeout
+                // Initialize Spotify client
                 app.client = new SpotifyClient();
-                await Promise.race([
-                    app.client.initialize(),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Spotify connection timeout')), 10000)
-                    )
-                ]);
+                await app.client.initialize();
                 
-                updateProgress(2, 'Checking Premium status...');
+                updateProgress(2, 'Checking Premium and finding devices...');
                 await checkPremiumStatus();
                 
-                updateProgress(3, 'Setting up playback...');
-                app.playback = new SpotifyPlayback(app.client);
+                updateProgress(3, 'Connecting to native Spotify app...');
+                // Use native Spotify playback instead of Web Playback SDK
+                app.playback = new NativeSpotifyPlayback(app.client);
+                await app.playback.initialize();
                 
-                // Use a shorter timeout for playback initialization
-                await Promise.race([
-                    app.playback.initialize(),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Playback setup timeout')), 15000)
-                    )
-                ]);
+                updateProgress(4, 'Initializing game components...');
                 
-                updateProgress(4, 'Looking for devices...');
-                await waitForDevice();
+                // Initialize timing clock
+                app.timingClock = new TimingClock();
                 
-                updateProgress(5, 'Initializing game components...');
-                
-                // Initialize game components in parallel where possible
+                // Initialize game components in parallel
                 const canvas = document.getElementById('gameCanvas');
                 
-                // These can be created in parallel
                 await Promise.all([
-                    // Game engine
                     new Promise(resolve => {
                         app.engine = new GameEngine();
                         resolve();
                     }),
-                    // Input handler
                     new Promise(resolve => {
                         app.input = new GameInput(canvas);
                         resolve();
                     }),
-                    // Renderer
                     new Promise(resolve => {
                         app.render = new GameRender(canvas);
                         resolve();
                     }),
-                    // UI handler
                     new Promise(resolve => {
                         app.ui = new GameUI();
                         resolve();
                     })
                 ]);
                 
-                updateProgress(6, 'Setting up event handlers...');
+                updateProgress(5, 'Setting up event handlers...');
                 setupEventHandlers();
                 
-                updateProgress(7, 'Preparing game session...');
+                updateProgress(6, 'Preparing game session...');
                 await startGameSession();
                 
-                updateProgress(8, 'Ready!');
+                updateProgress(7, 'Ready!');
+                
+                // Show calibration panel
+                document.getElementById('calibrationPanel').style.display = 'block';
+                document.getElementById('calibrationValue').textContent = app.playback.calibrationOffset || '0';
+                
+                // Enable debug mode toggle (press D key)
+                setupDebugMode();
                 
                 // Small delay to show completion
                 await new Promise(resolve => setTimeout(resolve, 500));
@@ -489,7 +617,8 @@
         function setupEventHandlers() {
             // Input to engine connection
             app.input.onLaneHit = (lane, time) => {
-                const result = app.engine.handleLaneHit(lane, time);
+                const gameTime = app.timingClock.getTime();
+                const result = app.engine.handleLaneHit(lane, gameTime);
                 if (result) {
                     app.render.addHitEffect(lane, result.hitType, result.score);
                     if (result.combo > 10) {
@@ -501,27 +630,39 @@
             // Engine event handlers
             app.engine.onTrackStart = (track, requiredPercent) => {
                 console.log(`Track started: ${track.name} (${requiredPercent}% required)`);
+                app.timingClock.start(); // Start precise timing when track starts
             };
             
             app.engine.onTrackEnd = (result) => {
                 app.ui.showTrackComplete(result);
+                app.timingClock.pause();
             };
             
             app.engine.onSessionComplete = (result) => {
                 app.ui.showResults(result);
                 stopGameLoop();
+                app.timingClock.reset();
+                // Hide calibration panel
+                document.getElementById('calibrationPanel').style.display = 'none';
             };
             
-            // Playback event handlers
+            // Native playback event handlers
             app.playback.onTrackChange = async (track) => {
                 try {
-                    // Use a timeout for audio analysis to prevent hanging
+                    console.log(`Track changed: ${track.name}`);
+                    
+                    // Reset and start timing clock for new track
+                    app.timingClock.reset();
+                    app.timingClock.start();
+                    
+                    // Get audio analysis with timeout
                     const analysis = await Promise.race([
                         app.client.getAudioAnalysis(track.id),
                         new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Audio analysis timeout')), 10000)
+                            setTimeout(() => reject(new Error('Audio analysis timeout')), 8000)
                         )
                     ]);
+                    
                     await app.engine.startTrack(track, analysis);
                 } catch (error) {
                     console.error('Failed to get audio analysis:', error);
@@ -531,186 +672,93 @@
                     app.engine.startTrackWithChart(track, fallbackChart);
                 }
             };
+
+            app.playback.onStateChange = (state) => {
+                // Sync timing clock with playback state
+                if (state.is_playing && app.timingClock.isPaused) {
+                    app.timingClock.resume();
+                } else if (!state.is_playing && !app.timingClock.isPaused) {
+                    app.timingClock.pause();
+                }
+            };
             
             // Enable input after initialization
             app.input.enable();
         }
 
+        function setupDebugMode() {
+            let debugMode = false;
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'd') {
+                    debugMode = !debugMode;
+                    const debugPanel = document.getElementById('timingDebug');
+                    debugPanel.style.display = debugMode ? 'block' : 'none';
+                }
+            });
+
+            // Update debug info
+            setInterval(() => {
+                if (debugMode && app.playback && app.timingClock) {
+                    const spotifyPos = app.playback.getPositionMs();
+                    const clockTime = app.timingClock.getTime();
+                    const drift = Math.abs(spotifyPos - clockTime);
+                    
+                    document.getElementById('timingInfo').innerHTML = `
+                        Spotify: ${spotifyPos.toFixed(0)}ms<br>
+                        Clock: ${clockTime.toFixed(0)}ms<br>
+                        Drift: ${drift.toFixed(0)}ms<br>
+                        Offset: ${app.playback.calibrationOffset || 0}ms<br>
+                        Playing: ${app.playback.getIsPlaying() ? 'Yes' : 'No'}
+                    `;
+                }
+            }, 100);
+        }
+
         async function checkPremiumStatus() {
             try {
-                // Quick timeout for this check
-                await Promise.race([
-                    app.client.request('/v1/me/player/devices'),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Premium check timeout')), 5000)
-                    )
-                ]);
+                await app.client.request('/v1/me/player/devices');
             } catch (error) {
                 if (error.status === 403) {
                     throw new Error(config.ERRORS.NO_PREMIUM);
                 }
-                if (error.message.includes('timeout')) {
-                    // Continue anyway - might just be a slow connection
-                    console.warn('Premium check timed out, continuing...');
-                }
             }
-        }
-
-        async function waitForDevice() {
-            const maxAttempts = 30;
-            const checkInterval = 3000; // 3 seconds between checks
-            let attempts = 0;
-            let hasShownInstructions = false;
-            
-            while (attempts < maxAttempts) {
-                try {
-                    // Check for Spotify devices with timeout
-                    const devices = await Promise.race([
-                        app.client.request('/v1/me/player/devices'),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Device check timeout')), 5000)
-                        )
-                    ]);
-                    
-                    if (!devices.devices || devices.devices.length === 0) {
-                        // No devices at all - user needs to install/open Spotify
-                        if (!hasShownInstructions) {
-                            updateShieldMessage(
-                                'No Spotify devices found.\n\n' +
-                                'Please:\n' +
-                                '1. Open the Spotify app on any device\n' +
-                                '2. Start playing any song\n' +
-                                '3. Return to this tab'
-                            );
-                            hasShownInstructions = true;
-                        }
-                    } else {
-                        // Check if any device is currently active (playing music)
-                        const activeDevice = devices.devices.find(d => d.is_active);
-                        
-                        if (activeDevice) {
-                            // Perfect! User has Spotify open and playing
-                            updateShieldMessage(`Found active device: ${activeDevice.name}. Taking control...`);
-                            
-                            // Store the active device info for later use
-                            app.originalDevice = activeDevice;
-                            
-                            // Wait a moment to show the success message
-                            await new Promise(resolve => setTimeout(resolve, 1500));
-                            return activeDevice;
-                        } else {
-                            // Devices exist but none are active - give specific instructions
-                            const deviceNames = devices.devices.map(d => d.name).join(', ');
-                            const deviceCount = devices.devices.length;
-                            
-                            updateShieldMessage(
-                                `Found ${deviceCount} Spotify device${deviceCount > 1 ? 's' : ''}: ${deviceNames}\n\n` +
-                                'But none are currently playing music.\n\n' +
-                                'Please start playing any song in Spotify, then return here. ' +
-                                'The rhythm game will automatically take control.'
-                            );
-                        }
-                    }
-                    
-                } catch (error) {
-                    console.warn('Device check failed:', error);
-                    
-                    // Show different messages based on the type of error
-                    if (error.status === 403) {
-                        throw new Error(config.ERRORS.NO_PREMIUM);
-                    } else if (!hasShownInstructions) {
-                        updateShieldMessage(
-                            'Checking for Spotify devices...\n\n' +
-                            'Make sure Spotify is open and playing music.'
-                        );
-                    }
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, checkInterval));
-                attempts++;
-                
-                // Update countdown every few attempts to show progress
-                if (attempts % 5 === 0) {
-                    const remainingTime = Math.max(0, (maxAttempts - attempts) * 3);
-                    const currentMessage = document.getElementById('shieldMessage').textContent;
-                    updateShieldMessage(currentMessage + `\n\nTimeout in ${remainingTime} seconds...`);
-                }
-            }
-            
-            // If we get here, we've timed out
-            throw new Error(
-                'Could not find an active Spotify device.\n\n' +
-                'Please ensure:\n' +
-                '• Spotify app is installed and open\n' +
-                '• You are logged into the same account\n' +
-                '• Music is currently playing\n' +
-                '• Device has internet connection\n\n' +
-                'Then refresh this page to try again.'
-            );
         }
 
         async function startGameSession() {
             try {
-                // Get user profile with timeout
-                const profile = await Promise.race([
-                    app.client.request('/v1/me'),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-                    )
-                ]);
-                
+                // Get user profile
+                const profile = await app.client.request('/v1/me');
                 const country = new URLSearchParams(window.location.search).get('country') || 
                                sessionStorage.getItem('country') || 
                                profile.country || 'US';
                 
-                // Generate track list with timeout
-                const tracks = await Promise.race([
-                    generateTrackList(country),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Track generation timeout')), 10000)
-                    )
-                ]);
+                // Generate track list
+                const tracks = await generateTrackList(country);
                 
                 // Create playlists in parallel
                 const playlistNames = generatePlaylistNames(country);
                 const [publicPlaylist, privatePlaylist] = await Promise.all([
-                    createPlaylist(profile.id, playlistNames.public, true).catch(err => {
-                        console.warn('Public playlist creation failed:', err);
-                        return null;
-                    }),
-                    createPlaylist(profile.id, playlistNames.private, false).catch(err => {
-                        console.warn('Private playlist creation failed:', err);
-                        return null;
-                    })
+                    createPlaylist(profile.id, playlistNames.public, true).catch(() => null),
+                    createPlaylist(profile.id, playlistNames.private, false).catch(() => null)
                 ]);
                 
                 // Add tracks to playlists (non-blocking)
                 const trackUris = tracks.map(id => `spotify:track:${id}`);
                 if (publicPlaylist) {
-                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch(err => 
-                        console.warn('Failed to add tracks to public playlist:', err)
-                    );
+                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch(console.warn);
                 }
                 if (privatePlaylist) {
-                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch(err => 
-                        console.warn('Failed to add tracks to private playlist:', err)
-                    );
+                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch(console.warn);
                 }
                 
                 // Initialize game session
                 app.engine.initializeSession(tracks, profile.id, generateUUID());
                 
-                // Wait for Web Playback SDK device to be ready
-                updateShieldMessage('Preparing game audio...');
-                await waitForWebPlaybackDevice();
-                
-                // Transfer playback from user's device to our game
-                await transferPlaybackToGame();
-                
-                // Now start our playlist
+                // Start playlist on user's native Spotify app
                 const playlistToUse = publicPlaylist || privatePlaylist;
                 if (playlistToUse) {
-                    updateShieldMessage('Starting game playlist...');
+                    updateShieldMessage('Starting playlist on your Spotify app...');
                     await app.playback.startPlayback(playlistToUse.uri, 0);
                     app.playback.lockControls(playlistToUse.uri, tracks);
                 } else {
@@ -723,91 +771,6 @@
             }
         }
 
-        // Helper function to wait for Web Playback SDK device to be ready
-        async function waitForWebPlaybackDevice() {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Web Playback SDK device not ready within 15 seconds'));
-                }, 15000);
-                
-                // Check if device is already ready
-                if (app.playback && app.playback.getDeviceId()) {
-                    clearTimeout(timeout);
-                    console.log('Web Playback SDK device already ready');
-                    resolve();
-                    return;
-                }
-                
-                // Wait for ready callback
-                if (app.playback) {
-                    const originalOnReady = app.playback.onReady;
-                    app.playback.onReady = (deviceId) => {
-                        clearTimeout(timeout);
-                        console.log('Web Playback SDK ready with device:', deviceId);
-                        
-                        // Call original callback if it existed
-                        if (originalOnReady) {
-                            originalOnReady(deviceId);
-                        }
-                        
-                        resolve();
-                    };
-                } else {
-                    clearTimeout(timeout);
-                    reject(new Error('Playback not initialized'));
-                }
-            });
-        }
-
-        // Helper function to transfer playback control to the game
-        async function transferPlaybackToGame() {
-            const gameDeviceId = app.playback.getDeviceId();
-            if (!gameDeviceId) {
-                throw new Error('Game device not ready');
-            }
-            
-            try {
-                updateShieldMessage('Transferring playback to game...');
-                
-                // Transfer playback to our Web Playback SDK device
-                await app.client.request(`/v1/me/player`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        device_ids: [gameDeviceId],
-                        play: false // Don't start playing yet - we'll control that
-                    })
-                });
-                
-                // Wait for the transfer to complete
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Verify the transfer worked
-                try {
-                    const currentState = await app.client.request('/v1/me/player');
-                    if (currentState.device && currentState.device.id === gameDeviceId) {
-                        console.log('Playback successfully transferred to rhythm game device');
-                    } else {
-                        console.warn('Playback transfer may not have completed fully');
-                    }
-                } catch (stateError) {
-                    // Don't fail if we can't verify - the transfer might still work
-                    console.warn('Could not verify playback transfer:', stateError);
-                }
-                
-            } catch (error) {
-                console.error('Failed to transfer playback:', error);
-                
-                // More specific error messages
-                if (error.status === 404) {
-                    throw new Error('No active playback found. Please start playing music in Spotify first.');
-                } else if (error.status === 403) {
-                    throw new Error(config.ERRORS.NO_PREMIUM);
-                } else {
-                    throw new Error('Could not transfer playback to game. Please ensure Spotify is still playing and try refreshing.');
-                }
-            }
-        }
-
         function startGameLoop() {
             let lastTime = performance.now();
             
@@ -817,8 +780,11 @@
                 const deltaTime = currentTime - lastTime;
                 lastTime = currentTime;
                 
+                // Use our high-precision timing clock instead of Spotify position
+                const gameTime = app.timingClock.getTime();
+                
                 // Update game components
-                app.engine.update(deltaTime, app.playback.getPositionMs());
+                app.engine.update(deltaTime, gameTime);
                 app.input.update();
                 app.ui.update(app.engine.getGameState());
                 
@@ -843,17 +809,11 @@
             const lockedTracks = config.LOCKED_TRACK_IDS;
             
             try {
-                // Simplified track generation with timeout
-                const fallback = await Promise.race([
-                    app.client.getRecommendations({
-                        seed_genres: 'pop,dance',
-                        market: country,
-                        limit: 1
-                    }),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Recommendations timeout')), 5000)
-                    )
-                ]);
+                const fallback = await app.client.getRecommendations({
+                    seed_genres: 'pop,dance',
+                    market: country,
+                    limit: 1
+                });
                 
                 if (fallback.tracks && fallback.tracks.length > 0) {
                     return [...lockedTracks, fallback.tracks[0].id];
@@ -862,7 +822,6 @@
                 console.warn('Recommendations failed:', error);
             }
             
-            // Ultimate fallback
             return [...lockedTracks, lockedTracks[0]];
         }
 
@@ -875,8 +834,8 @@
             const noun = nouns[Math.floor(Math.random() * nouns.length)];
             
             return {
-                public: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`,
-                private: `RHYTHM – ${country} – ${adjective} ${noun} #${nonce}`
+                public: `RHYTHM — ${country} — ${adjective} ${noun} #${nonce}`,
+                private: `RHYTHM — ${country} — ${adjective} ${noun} #${nonce}`
             };
         }
 
@@ -914,10 +873,10 @@
 
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden && app.isInitialized) {
-                console.log('Page hidden');
-            } else if (!document.hidden && app.isInitialized) {
-                console.log('Page visible');
+            if (document.hidden && app.isInitialized && app.timingClock) {
+                app.timingClock.pause();
+            } else if (!document.hidden && app.isInitialized && app.timingClock && app.playback?.getIsPlaying()) {
+                app.timingClock.resume();
             }
         });
 
@@ -927,6 +886,9 @@
                 app.playback.unlockControls();
             }
             stopGameLoop();
+            if (app.timingClock) {
+                app.timingClock.reset();
+            }
         });
 
         // Initialize the game when page loads
