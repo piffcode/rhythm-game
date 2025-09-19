@@ -377,7 +377,7 @@
         import { GameInput } from './game-input.js';
         import { GameRender } from './game-render.js';
         import { GameUI } from './game-ui.js';
-        import { ChartGenerator } from './game-chart.js';
+        import { MidiChartGenerator } from './midi-chart-generator.js';
 
         // Global app state
         let app = {
@@ -565,6 +565,33 @@
                         resolve();
                     })
                 ]);
+                
+                // Wait for MIDI files to load
+                console.log('Waiting for MIDI files to load...');
+                await new Promise(resolve => {
+                    const checkMidi = () => {
+                        const availableTracks = app.engine.midiGenerator.getAvailableTracks();
+                        if (availableTracks.length > 0) {
+                            console.log(`MIDI loaded for ${availableTracks.length} tracks:`, availableTracks);
+                            resolve();
+                        } else {
+                            console.log('Still waiting for MIDI files...');
+                            setTimeout(checkMidi, 500);
+                        }
+                    };
+                    checkMidi();
+                });
+
+                // Override config for higher note density
+                if (window.config && window.config.CHART) {
+                    window.config.CHART.DENSITY_MULTIPLIERS = {
+                        EASY: 1.0,
+                        NORMAL: 1.5,   // Increased from default
+                        HARD: 2.0      // Increased from default
+                    };
+                    window.config.CHART.MIN_NOTE_SPACING = 100; // Reduced from default to allow closer notes
+                    console.log('Note density increased for more challenging gameplay');
+                }
 
                 updateProgress(5, 'Setting up event handlers...');
                 setupEventHandlers();
@@ -627,10 +654,16 @@
 
             // Add the track completion callback handlers
             app.engine.onAdvanceTrack = (trackIndex) => {
-                console.log(`Advancing to track ${trackIndex}`);
-                // Tell the playback system to advance to the next track
-                if (app.playback) {
-                    app.playback.advanceTrack();
+                console.log(`Game engine requesting advance to track ${trackIndex}`);
+                // Only advance if we have more tracks to play
+                if (trackIndex < app.engine.tracks.length) {
+                    if (app.playback && app.playback.advanceTrack) {
+                        app.playback.advanceTrack();
+                    } else {
+                        console.error('Playback system does not support advanceTrack method');
+                    }
+                } else {
+                    console.log('No more tracks to advance to - session should be complete');
                 }
             };
 
@@ -638,6 +671,14 @@
             app.playback.onTrackChange = async (track) => {
                 try {
                     console.log(`Track changed: ${track.name}`);
+                    
+                    // Check if MIDI data exists for this track - MANDATORY
+                    if (!app.engine.midiGenerator.hasMidiData(track.id)) {
+                        const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
+                        console.error(error);
+                        showError(error);
+                        return;
+                    }
 
                     // Auto-calibrate for this track
                     await autoCalibrate();
@@ -646,25 +687,21 @@
                     app.timingClock.reset();
                     app.timingClock.start();
 
-                    // Only use MIDI - no audio analysis
-                    await app.engine.startTrack(track, null);
-                    console.log('Track started successfully with auto-calibration');
+                    // ONLY try MIDI - no fallbacks allowed
+                    try {
+                        await app.engine.startTrack(track, null);
+                        console.log('Track started successfully with MIDI chart');
+                    } catch (error) {
+                        const errorMsg = `Failed to start MIDI track: ${track.name}. ${error.message}`;
+                        console.error(errorMsg);
+                        showError(errorMsg);
+                        return;
+                    }
 
                 } catch (error) {
-                    console.error('Failed to start track:', error);
-                    console.log('Trying fallback chart...');
-
-                    const chartGenerator = new ChartGenerator();
-                    const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
-                    console.log('Generated fallback chart with', fallbackChart.notes.length, 'notes');
-
-                    // Check if startTrackWithChart method exists
-                    if (app.engine.startTrackWithChart) {
-                        await app.engine.startTrackWithChart(track, fallbackChart);
-                        console.log('Fallback chart started successfully');
-                    } else {
-                        console.error('startTrackWithChart method does not exist');
-                    }
+                    const errorMsg = `Critical error loading track: ${track.name}. ${error.message}`;
+                    console.error(errorMsg);
+                    showError(errorMsg);
                 }
             };
 
@@ -752,6 +789,25 @@
 
                 // Generate track list
                 const tracks = await generateTrackList(country);
+                
+                // CRITICAL: Validate that ALL tracks have MIDI data
+                const tracksWithMidi = tracks.filter(trackId => app.engine.midiGenerator.hasMidiData(trackId));
+                const tracksWithoutMidi = tracks.filter(trackId => !app.engine.midiGenerator.hasMidiData(trackId));
+                
+                console.log(`Tracks with MIDI: ${tracksWithMidi.length}/${tracks.length}`);
+                console.log('Available MIDI tracks:', tracksWithMidi);
+                
+                if (tracksWithoutMidi.length > 0) {
+                    console.warn('Tracks missing MIDI:', tracksWithoutMidi);
+                }
+                
+                if (tracksWithMidi.length === 0) {
+                    throw new Error('No tracks with MIDI data available. Game requires MIDI charts to function.');
+                }
+                
+                // Use only tracks that have MIDI data
+                const finalTracks = tracksWithMidi;
+                console.log(`Using ${finalTracks.length} tracks with MIDI data`);
 
                 // Create playlists in parallel
                 const playlistNames = generatePlaylistNames(country);
@@ -761,7 +817,7 @@
                 ]);
 
                 // Add tracks to playlists (non-blocking)
-                const trackUris = tracks.map(id => `spotify:track:${id}`);
+                const trackUris = finalTracks.map(id => `spotify:track:${id}`);
                 if (publicPlaylist) {
                     addTracksToPlaylist(publicPlaylist.id, trackUris).catch(console.warn);
                 }
@@ -769,15 +825,15 @@
                     addTracksToPlaylist(privatePlaylist.id, trackUris).catch(console.warn);
                 }
 
-                // Initialize game session
-                app.engine.initializeSession(tracks, profile.id, generateUUID());
+                // Initialize game session with MIDI-validated tracks
+                app.engine.initializeSession(finalTracks, profile.id, generateUUID());
 
                 // Start playlist on user's native Spotify app
                 const playlistToUse = publicPlaylist || privatePlaylist;
                 if (playlistToUse) {
                     updateShieldMessage('Starting playlist on your Spotify app...');
                     await app.playback.startPlayback(playlistToUse.uri, 0);
-                    app.playback.lockControls(playlistToUse.uri, tracks);
+                    app.playback.lockControls(playlistToUse.uri, finalTracks);
                 } else {
                     throw new Error('Failed to create any playlists');
                 }
@@ -797,8 +853,27 @@
                 const deltaTime = currentTime - lastTime;
                 lastTime = currentTime;
 
-                // Use our high-precision timing clock instead of Spotify position
-                const gameTime = app.timingClock.getTime();
+                // Get current position from Spotify playback
+                let spotifyPosition = 0;
+                if (app.playback && app.playback.getIsPlaying()) {
+                    spotifyPosition = app.playback.getPositionMs();
+                }
+
+                // Use our high-precision timing clock, but sync with Spotify periodically
+                let gameTime = app.timingClock.getTime();
+                
+                // Sync with Spotify position every 2 seconds if there's significant drift
+                if (spotifyPosition > 0) {
+                    const drift = Math.abs(gameTime - spotifyPosition);
+                    if (drift > 200) { // More than 200ms drift
+                        console.log(`Syncing game time: ${gameTime}ms -> ${spotifyPosition}ms (drift: ${drift}ms)`);
+                        app.timingClock.reset();
+                        app.timingClock.start();
+                        // Adjust the start time to match Spotify
+                        app.timingClock.startTime = performance.now() - spotifyPosition;
+                        gameTime = spotifyPosition;
+                    }
+                }
 
                 // Update game components
                 app.engine.update(deltaTime, gameTime);
