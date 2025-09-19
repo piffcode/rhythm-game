@@ -308,41 +308,6 @@
             z-index: 200;
             display: none;
         }
-
-        .calibration-panel {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.9);
-            color: white;
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 150;
-            text-align: center;
-            display: none;
-        }
-
-        .calibration-controls {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .calibration-btn {
-            background: #1db954;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-        }
-
-        .calibration-btn:hover {
-            background: #1ed760;
-        }
     </style>
 </head>
 <body>
@@ -369,21 +334,6 @@
         <!-- Timing Debug (hidden by default) -->
         <div class="timing-debug" id="timingDebug">
             <div id="timingInfo">Timing Info</div>
-        </div>
-
-        <!-- Calibration Panel -->
-        <div class="calibration-panel" id="calibrationPanel">
-            <div>Audio Sync Calibration: <span id="calibrationValue">0</span>ms</div>
-            <div class="calibration-controls">
-                <button class="calibration-btn" onclick="adjustCalibration(-10)">-10ms</button>
-                <button class="calibration-btn" onclick="adjustCalibration(-1)">-1ms</button>
-                <button class="calibration-btn" onclick="resetCalibration()">Reset</button>
-                <button class="calibration-btn" onclick="adjustCalibration(1)">+1ms</button>
-                <button class="calibration-btn" onclick="adjustCalibration(10)">+10ms</button>
-            </div>
-            <div style="font-size: 11px; margin-top: 8px; opacity: 0.7;">
-                Tap - to make notes appear earlier, + to make them appear later
-            </div>
         </div>
         
         <!-- Input Shield (shown during loading) -->
@@ -441,23 +391,6 @@
             isInitialized: false,
             gameLoopId: null,
             timingClock: null // High precision timing
-        };
-
-        // Timing calibration functions (global scope for HTML onclick)
-        window.adjustCalibration = function(delta) {
-            if (app.playback) {
-                const currentOffset = app.playback.calibrationOffset || 0;
-                const newOffset = currentOffset + delta;
-                app.playback.setCalibrationOffset(newOffset);
-                document.getElementById('calibrationValue').textContent = newOffset;
-            }
-        };
-
-        window.resetCalibration = function() {
-            if (app.playback) {
-                app.playback.setCalibrationOffset(0);
-                document.getElementById('calibrationValue').textContent = '0';
-            }
         };
 
         // High precision timing clock
@@ -527,6 +460,53 @@
             }
         }
 
+        // Auto-calibration function
+        async function autoCalibrate() {
+            try {
+                // Get tempo information from the current track or MIDI data
+                let targetOffset = 0;
+                
+                if (app.engine && app.engine.currentChart && app.engine.currentChart.metadata.source === 'midi') {
+                    // For MIDI tracks, use a small positive offset to account for processing
+                    targetOffset = 15; // 15ms ahead to compensate for processing delay
+                } else {
+                    // For other tracks, use audio analysis or default
+                    const track = await app.client.getCurrentPlaybackState();
+                    if (track && track.item) {
+                        try {
+                            const features = await app.client.getAudioFeatures(track.item.id);
+                            const tempo = features.tempo || 120;
+                            
+                            // Calculate offset based on tempo (slower songs need more lookahead)
+                            if (tempo < 90) {
+                                targetOffset = 25; // Slower songs
+                            } else if (tempo > 140) {
+                                targetOffset = 10; // Faster songs
+                            } else {
+                                targetOffset = 15; // Medium tempo
+                            }
+                        } catch (error) {
+                            console.warn('Could not get audio features, using default offset');
+                            targetOffset = 15;
+                        }
+                    }
+                }
+                
+                // Apply the calculated offset
+                if (app.playback) {
+                    app.playback.setCalibrationOffset(targetOffset);
+                    console.log(`Auto-calibration set to ${targetOffset}ms`);
+                }
+                
+            } catch (error) {
+                console.warn('Auto-calibration failed:', error);
+                // Use default offset
+                if (app.playback) {
+                    app.playback.setCalibrationOffset(15);
+                }
+            }
+        }
+
         // Initialize the game
         async function initGame() {
             try {
@@ -592,9 +572,8 @@
                 
                 updateProgress(7, 'Ready!');
                 
-                // Show calibration panel
-                document.getElementById('calibrationPanel').style.display = 'block';
-                document.getElementById('calibrationValue').textContent = app.playback.calibrationOffset || '0';
+                // Auto-calibrate based on tempo instead of showing manual calibration
+                await autoCalibrate();
                 
                 // Enable debug mode toggle (press D key)
                 setupDebugMode();
@@ -642,42 +621,42 @@
                 app.ui.showResults(result);
                 stopGameLoop();
                 app.timingClock.reset();
-                // Hide calibration panel
-                document.getElementById('calibrationPanel').style.display = 'none';
+                // Auto-calibration is handled per track, no manual panel needed
             };
             
             // Native playback event handlers
-         app.playback.onTrackChange = async (track) => {
-    try {
-        console.log(`Track changed: ${track.name}`);
-        console.log('About to start track in game engine with MIDI only');
-        console.log('app.engine exists:', !!app.engine);
-        console.log('app.engine.startTrack exists:', !!app.engine.startTrack);
-        
-        // Reset and start timing clock for new track
-        app.timingClock.reset();
-        app.timingClock.start();
-        
-        // Only use MIDI - no audio analysis
-        await app.engine.startTrack(track, null);
-        console.log('Track started successfully with MIDI');
-        
-    } catch (error) {
-        console.error('Failed to start track with MIDI:', error);
-        console.log('Trying fallback chart...');
-        const chartGenerator = new ChartGenerator();
-        const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
-        console.log('Generated fallback chart with', fallbackChart.notes.length, 'notes');
-        
-        // Check if startTrackWithChart method exists
-        if (app.engine.startTrackWithChart) {
-            await app.engine.startTrackWithChart(track, fallbackChart);
-            console.log('Fallback chart started successfully');
-        } else {
-            console.error('startTrackWithChart method does not exist');
-        }
-    }
-};
+            app.playback.onTrackChange = async (track) => {
+                try {
+                    console.log(`Track changed: ${track.name}`);
+                    
+                    // Auto-calibrate for this track
+                    await autoCalibrate();
+                    
+                    // Reset and start timing clock for new track
+                    app.timingClock.reset();
+                    app.timingClock.start();
+                    
+                    // Only use MIDI - no audio analysis
+                    await app.engine.startTrack(track, null);
+                    console.log('Track started successfully with auto-calibration');
+                    
+                } catch (error) {
+                    console.error('Failed to start track:', error);
+                    console.log('Trying fallback chart...');
+                    const chartGenerator = new ChartGenerator();
+                    const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
+                    console.log('Generated fallback chart with', fallbackChart.notes.length, 'notes');
+                    
+                    // Check if startTrackWithChart method exists
+                    if (app.engine.startTrackWithChart) {
+                        await app.engine.startTrackWithChart(track, fallbackChart);
+                        console.log('Fallback chart started successfully');
+                    } else {
+                        console.error('startTrackWithChart method does not exist');
+                    }
+                }
+            };
+            
             app.playback.onStateChange = (state) => {
                 // Sync timing clock with playback state
                 if (state.is_playing && app.timingClock.isPaused) {
@@ -708,12 +687,13 @@
                     const spotifyPos = app.playback.getPositionMs();
                     const clockTime = app.timingClock.getTime();
                     const drift = Math.abs(spotifyPos - clockTime);
+                    const autoOffset = app.playback.calibrationOffset || 0;
                     
                     document.getElementById('timingInfo').innerHTML = `
                         Spotify: ${spotifyPos.toFixed(0)}ms<br>
                         Clock: ${clockTime.toFixed(0)}ms<br>
                         Drift: ${drift.toFixed(0)}ms<br>
-                        Offset: ${app.playback.calibrationOffset || 0}ms<br>
+                        Auto-Offset: ${autoOffset}ms<br>
                         Playing: ${app.playback.getIsPlaying() ? 'Yes' : 'No'}
                     `;
                 }
