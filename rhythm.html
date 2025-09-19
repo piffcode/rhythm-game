@@ -647,27 +647,35 @@
             };
             
             // Native playback event handlers
-           app.playback.onTrackChange = async (track) => {
+         app.playback.onTrackChange = async (track) => {
     try {
         console.log(`Track changed: ${track.name}`);
         console.log('About to start track in game engine with MIDI only');
+        console.log('app.engine exists:', !!app.engine);
+        console.log('app.engine.startTrack exists:', !!app.engine.startTrack);
         
         // Reset and start timing clock for new track
         app.timingClock.reset();
         app.timingClock.start();
         
         // Only use MIDI - no audio analysis
-        await app.engine.startTrack(track, null); // Pass null for audio analysis
+        await app.engine.startTrack(track, null);
         console.log('Track started successfully with MIDI');
         
     } catch (error) {
         console.error('Failed to start track with MIDI:', error);
-        // If MIDI fails, you could either:
-        // 1. Skip the track, or 
-        // 2. Use a test chart as fallback
+        console.log('Trying fallback chart...');
         const chartGenerator = new ChartGenerator();
         const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
-        app.engine.startTrackWithChart(track, fallbackChart);
+        console.log('Generated fallback chart with', fallbackChart.notes.length, 'notes');
+        
+        // Check if startTrackWithChart method exists
+        if (app.engine.startTrackWithChart) {
+            await app.engine.startTrackWithChart(track, fallbackChart);
+            console.log('Fallback chart started successfully');
+        } else {
+            console.error('startTrackWithChart method does not exist');
+        }
     }
 };
             app.playback.onStateChange = (state) => {
