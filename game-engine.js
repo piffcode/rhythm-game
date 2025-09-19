@@ -650,7 +650,7 @@ export class GameEngine {
         this.difficulty = 'NORMAL';
         
         // Chart generators
-        this.midiGenerator = new ImprovedMidiChartGenerator();
+        this.midiGenerator = new MidiChartGenerator();
         this.audioChartGenerator = new ChartGenerator();
         
         // Session data
