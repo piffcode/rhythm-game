@@ -206,7 +206,7 @@ export class NativeSpotifyPlayback {
         
         if (Math.abs(positionDelta) < 100) {
             // Small differences - smooth interpolation
-            this.smoothedPosition += positionDelta * config.PERFORMANCE.POSITION_SMOOTHING;
+            this.smoothedPosition += positionDelta * 0.1;
         } else {
             // Large jump - snap immediately (seeking detected)
             this.smoothedPosition = targetPosition;
@@ -223,7 +223,7 @@ export class NativeSpotifyPlayback {
         if (!state.is_playing && this.positionMs < (state.item?.duration_ms - 2000)) {
             console.log('Detected pause during game, resuming...');
             this.resume().then(() => {
-                this.showToast(config.ERRORS.CONTROLS_LOCKED);
+                this.showToast('Playback controls are locked during gameplay');
             });
         }
         
@@ -232,25 +232,10 @@ export class NativeSpotifyPlayback {
             const currentTrackId = state.item.id;
             const expectedTrackId = this.sessionTracks[this.expectedTrackIndex];
             
-            if (currentTrackId !== expectedTrackId) {
+            if (currentTrackId !== expectedTrackId && !this.isAutoAdvancing) {
                 console.log('Detected unauthorized track skip, correcting...');
                 this.snapToExpectedTrack();
             }
-        }
-        
-        // Check for manual seeking (large position jumps)
-        const expectedPosition = this.calculateExpectedPosition();
-        const positionDrift = Math.abs(this.positionMs - expectedPosition);
-        
-        if (positionDrift > config.PERFORMANCE.SEEK_THRESHOLD) {
-            console.log(`Detected manual seek (drift: ${positionDrift}ms), correcting...`);
-            this.seekToExpectedPosition();
-        }
-        
-        // Check if user changed volume significantly
-        if (state.device && state.device.volume_percent < 10) {
-            console.log('Volume too low for rhythm game');
-            this.showToast('Please turn up the volume for the best rhythm game experience!');
         }
     }
 
@@ -294,30 +279,42 @@ export class NativeSpotifyPlayback {
     }
 
     /**
+     * Advance to next track in the session - FIXED METHOD NAME
+     */
+    async advanceTrack() {
+        return await this.advanceToNextTrack();
+    }
+
+    /**
      * Advance to next track in the session
      */
     async advanceToNextTrack() {
-        if (!this.controlsLocked || !this.sessionContext) return;
+        if (!this.controlsLocked || !this.sessionContext) {
+            console.log('Cannot advance - controls not locked or no session context');
+            return;
+        }
         
         this.isAutoAdvancing = true;
         this.expectedTrackIndex++;
         
+        console.log(`Advancing to track index: ${this.expectedTrackIndex}`);
+        
         try {
             await this.client.skipNext(this.activeDeviceId);
-            console.log('Advanced to track index:', this.expectedTrackIndex);
+            console.log('Successfully advanced to next track');
             
             // Update state after skip
             setTimeout(() => {
                 this.updatePlaybackState();
-            }, 500);
+                this.isAutoAdvancing = false;
+            }, 1500);
             
         } catch (error) {
             console.error('Failed to advance track:', error);
+            this.isAutoAdvancing = false;
+            
+            // Try alternative method
             await this.snapToExpectedTrack();
-        } finally {
-            setTimeout(() => {
-                this.isAutoAdvancing = false;
-            }, 2000);
         }
     }
 
@@ -342,56 +339,10 @@ export class NativeSpotifyPlayback {
     }
 
     /**
-     * Calculate expected position based on smooth tracking
-     */
-    calculateExpectedPosition() {
-        if (!this.lastUpdateTime || !this.isPlaying) {
-            return this.positionMs;
-        }
-        
-        const timeSinceUpdate = Date.now() - this.lastUpdateTime;
-        return this.positionMs + timeSinceUpdate;
-    }
-
-    /**
-     * Seek to expected position if user seeked manually
-     */
-    async seekToExpectedPosition() {
-        const expectedPosition = this.calculateExpectedPosition();
-        
-        try {
-            await this.client.seek(expectedPosition, this.activeDeviceId);
-            console.log(`Corrected position to ${expectedPosition}ms`);
-            
-        } catch (error) {
-            console.error('Failed to correct position:', error);
-        }
-    }
-
-    /**
      * Get current playback position with calibration
      */
     getPositionMs() {
         return this.smoothedPosition + this.calibrationOffset;
-    }
-
-    /**
-     * Pause playback (only when controls not locked)
-     */
-    async pause() {
-        if (this.controlsLocked) {
-            console.warn('Cannot pause - controls are locked during game');
-            this.showToast(config.ERRORS.CONTROLS_LOCKED);
-            return;
-        }
-        
-        try {
-            await this.client.pausePlayback(this.activeDeviceId);
-            console.log('Playback paused');
-            
-        } catch (error) {
-            console.error('Failed to pause playback:', error);
-        }
     }
 
     /**
@@ -408,75 +359,6 @@ export class NativeSpotifyPlayback {
     }
 
     /**
-     * Seek to specific position
-     */
-    async seek(positionMs) {
-        if (this.controlsLocked) {
-            console.warn('Cannot seek - controls are locked during game');
-            return;
-        }
-        
-        try {
-            await this.client.seek(positionMs, this.activeDeviceId);
-            this.positionMs = positionMs;
-            this.smoothedPosition = positionMs;
-            this.lastUpdateTime = Date.now();
-            
-        } catch (error) {
-            console.error('Failed to seek:', error);
-        }
-    }
-
-    /**
-     * Skip to next track (only when controls not locked)
-     */
-    async skipNext() {
-        if (this.controlsLocked) {
-            console.warn('Cannot skip - controls are locked during game');
-            return;
-        }
-        
-        try {
-            await this.client.skipNext(this.activeDeviceId);
-            console.log('Skipped to next track');
-            
-        } catch (error) {
-            console.error('Failed to skip next:', error);
-        }
-    }
-
-    /**
-     * Skip to previous track (only when controls not locked)
-     */
-    async skipPrevious() {
-        if (this.controlsLocked) {
-            console.warn('Cannot skip - controls are locked during game');
-            return;
-        }
-        
-        try {
-            await this.client.skipPrevious(this.activeDeviceId);
-            console.log('Skipped to previous track');
-            
-        } catch (error) {
-            console.error('Failed to skip previous:', error);
-        }
-    }
-
-    /**
-     * Set volume (if device supports it)
-     */
-    async setVolume(volumePercent) {
-        try {
-            await this.client.setVolume(volumePercent, this.activeDeviceId);
-            console.log(`Volume set to ${volumePercent}%`);
-            
-        } catch (error) {
-            console.warn('Failed to set volume (device may not support remote volume control):', error);
-        }
-    }
-
-    /**
      * Lock controls for rhythm game session
      */
     lockControls(sessionContext, trackIds = []) {
@@ -486,6 +368,7 @@ export class NativeSpotifyPlayback {
         this.expectedTrackIndex = 0;
         
         console.log('Controls locked for rhythm game session');
+        console.log('Session tracks:', trackIds);
         this.showToast('Rhythm game active! Playback controls are temporarily locked.');
     }
 
@@ -509,20 +392,6 @@ export class NativeSpotifyPlayback {
         this.calibrationOffset = offsetMs;
         localStorage.setItem('rhythmCalibrationOffset', offsetMs.toString());
         console.log(`Calibration offset set to ${offsetMs}ms`);
-    }
-
-    /**
-     * Get current device info
-     */
-    getDeviceInfo() {
-        return this.originalDevice;
-    }
-
-    /**
-     * Get current track
-     */
-    getCurrentTrack() {
-        return this.currentTrack;
     }
 
     /**
@@ -583,24 +452,6 @@ export class NativeSpotifyPlayback {
                 }, 300);
             }
         }, 3000);
-    }
-
-    /**
-     * Get debug info
-     */
-    getDebugInfo() {
-        return {
-            activeDeviceId: this.activeDeviceId,
-            originalDevice: this.originalDevice?.name,
-            isPlaying: this.isPlaying,
-            position: this.positionMs,
-            smoothedPosition: this.smoothedPosition,
-            calibrationOffset: this.calibrationOffset,
-            controlsLocked: this.controlsLocked,
-            expectedTrackIndex: this.expectedTrackIndex,
-            currentTrack: this.currentTrack?.name || 'None',
-            sessionTracks: this.sessionTracks.length
-        };
     }
 
     /**
