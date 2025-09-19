@@ -27,7 +27,7 @@ export const config = {
     // Locked tracks for consistent gameplay
     LOCKED_TRACK_IDS: [
         '5FMyXeZ0reYloRTiCkPprT',  // Track 1
-        '0YWmeJtd7Fp1tH3978qUIH'   // Track 2
+        '6AriBfTagIjKVUov3WEwOa'   // Track 2
     ],
     
     // Required Spotify scopes (exact string as specified)
