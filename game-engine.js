@@ -1,7 +1,7 @@
-// game/engine.js - Core rhythm game engine
+// Update your game-engine.js to use MIDI charts
 
-import { config, getRandomPassThreshold, generateCompletionCode } from '../config.js';
-import { ChartGenerator } from './game-chart.js';
+import { config, generateCompletionCode } from './config.js';
+import { MidiChartGenerator } from './midi-chart-generator.js';
 
 export class GameEngine {
     constructor() {
@@ -10,6 +10,9 @@ export class GameEngine {
         this.isPlaying = false;
         this.isPaused = false;
         this.difficulty = 'NORMAL';
+        
+        // MIDI chart generator
+        this.midiGenerator = new MidiChartGenerator();
         
         // Session data
         this.sessionId = null;
@@ -85,17 +88,29 @@ export class GameEngine {
     }
 
     /**
-     * Start a new track
+     * Start a new track using MIDI chart if available
      */
-    async startTrack(trackData, audioAnalysis) {
+    async startTrack(trackData, audioAnalysis = null) {
         this.currentTrack = trackData;
         this.trackDuration = trackData.duration_ms;
         this.trackStartTime = Date.now();
-        this.requiredPercent = getRandomPassThreshold();
+        this.requiredPercent = this.getRandomPassThreshold();
         
-        // Generate chart from audio analysis
-        const chartGenerator = new ChartGenerator();
-        this.currentChart = chartGenerator.generateChart(audioAnalysis, this.difficulty);
+        // Try to generate chart from MIDI first
+        if (this.midiGenerator.hasMidiData(trackData.id)) {
+            console.log(`Using MIDI chart for track: ${trackData.name}`);
+            this.currentChart = this.midiGenerator.generateChartFromMidi(trackData.id, this.difficulty);
+        } else if (audioAnalysis) {
+            // Fallback to audio analysis
+            console.log(`Using audio analysis chart for track: ${trackData.name}`);
+            const chartGenerator = new ChartGenerator();
+            this.currentChart = chartGenerator.generateChart(audioAnalysis, this.difficulty);
+        } else {
+            // Ultimate fallback to test chart
+            console.log(`Using test chart for track: ${trackData.name}`);
+            const chartGenerator = new ChartGenerator();
+            this.currentChart = chartGenerator.generateTestChart(this.trackDuration, this.difficulty);
+        }
         
         // Reset track-specific state
         this.activeNotes = [];
@@ -109,7 +124,7 @@ export class GameEngine {
         
         this.isPlaying = true;
         
-        console.log(`Started track: ${trackData.name} (${this.requiredPercent}% required)`);
+        console.log(`Started track: ${trackData.name} (${this.requiredPercent}% required, ${this.currentChart.notes.length} notes)`);
         
         if (this.onTrackStart) {
             this.onTrackStart(trackData, this.requiredPercent);
@@ -117,7 +132,47 @@ export class GameEngine {
     }
 
     /**
-     * Main update loop
+     * Start track with pre-generated chart (fallback method)
+     */
+    async startTrackWithChart(trackData, chart) {
+        this.currentTrack = trackData;
+        this.trackDuration = trackData.duration_ms;
+        this.trackStartTime = Date.now();
+        this.requiredPercent = this.getRandomPassThreshold();
+        
+        // Use provided chart
+        this.currentChart = chart;
+        
+        // Reset track-specific state
+        this.activeNotes = [];
+        this.nextNoteIndex = 0;
+        this.hitNotes.clear();
+        this.positionOffset = 0;
+        
+        // Reset per-track stats
+        const trackStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
+        this.trackStats = trackStats;
+        
+        this.isPlaying = true;
+        
+        console.log(`Started track with provided chart: ${trackData.name} (${this.requiredPercent}% required)`);
+        
+        if (this.onTrackStart) {
+            this.onTrackStart(trackData, this.requiredPercent);
+        }
+    }
+
+    /**
+     * Get random pass threshold
+     */
+    getRandomPassThreshold() {
+        const min = config.PASS_THRESHOLD.MIN;
+        const max = config.PASS_THRESHOLD.MAX;
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    /**
+     * Main update loop - same as before
      */
     update(deltaTime, currentPositionMs) {
         if (!this.isInitialized || !this.isPlaying) return;
@@ -143,20 +198,6 @@ export class GameEngine {
     }
 
     /**
-     * Update performance metrics
-     */
-    updatePerformanceMetrics(deltaTime) {
-        this.frameCount++;
-        const now = Date.now();
-        
-        if (now - this.lastFpsTime >= 1000) {
-            this.currentFps = this.frameCount;
-            this.frameCount = 0;
-            this.lastFpsTime = now;
-        }
-    }
-
-    /**
      * Spawn notes that should appear on screen
      */
     spawnNotes() {
@@ -174,7 +215,7 @@ export class GameEngine {
                     ...note,
                     id: this.nextNoteIndex,
                     spawned: true,
-                    y: 0, // Will be calculated in render
+                    y: 0,
                     isHit: false
                 });
                 this.nextNoteIndex++;
@@ -248,7 +289,12 @@ export class GameEngine {
         if (bestNote) {
             const hitResult = this.calculateHitResult(bestTimeDiff);
             this.processHit(bestNote, hitResult, bestTimeDiff);
-            return hitResult;
+            return {
+                hitType: hitResult,
+                score: this.calculateScoreGain(hitResult),
+                combo: this.combo,
+                note: bestNote
+            };
         }
         
         return null;
@@ -267,6 +313,18 @@ export class GameEngine {
         } else {
             return 'MISS';
         }
+    }
+
+    /**
+     * Calculate score gain for hit result
+     */
+    calculateScoreGain(hitResult) {
+        const baseScore = config.SCORING[hitResult] || 0;
+        const comboMultiplier = Math.min(
+            1 + Math.floor(this.combo / config.SCORING.COMBO_THRESHOLD) * 0.1,
+            config.SCORING.COMBO_MULTIPLIER_MAX
+        );
+        return Math.floor(baseScore * comboMultiplier);
     }
 
     /**
@@ -291,12 +349,7 @@ export class GameEngine {
         }
         
         // Calculate score
-        const baseScore = config.SCORING[hitResult];
-        const comboMultiplier = Math.min(
-            1 + Math.floor(this.combo / config.SCORING.COMBO_THRESHOLD) * 0.1,
-            config.SCORING.COMBO_MULTIPLIER_MAX
-        );
-        const scoreGain = Math.floor(baseScore * comboMultiplier);
+        const scoreGain = this.calculateScoreGain(hitResult);
         this.score += scoreGain;
         
         // Update health
@@ -385,7 +438,8 @@ export class GameEngine {
             accuracy: Math.round(accuracy * 100) / 100,
             score: this.score,
             maxCombo: this.maxCombo,
-            hitStats: { ...this.trackStats }
+            hitStats: { ...this.trackStats },
+            chartSource: this.currentChart?.metadata?.source || 'unknown'
         };
         
         this.trackResults.push(trackResult);
@@ -404,7 +458,7 @@ export class GameEngine {
             // Prepare for next track
             setTimeout(() => {
                 this.isPlaying = true;
-            }, 1000); // Brief pause between tracks
+            }, 1000);
         }
     }
 
@@ -420,7 +474,8 @@ export class GameEngine {
             totalScore: this.score,
             totalMaxCombo: this.maxCombo,
             overallAccuracy: this.calculateOverallAccuracy(),
-            sessionStats: { ...this.hitStats }
+            sessionStats: { ...this.hitStats },
+            midiTracksUsed: this.trackResults.filter(r => r.chartSource === 'midi').length
         };
         
         console.log('Session completed:', sessionResult);
@@ -438,6 +493,20 @@ export class GameEngine {
         
         const successfulHits = this.hitStats.perfect + this.hitStats.great + this.hitStats.good;
         return Math.round((successfulHits / this.hitStats.total) * 10000) / 100;
+    }
+
+    /**
+     * Update performance metrics
+     */
+    updatePerformanceMetrics(deltaTime) {
+        this.frameCount++;
+        const now = Date.now();
+        
+        if (now - this.lastFpsTime >= 1000) {
+            this.currentFps = this.frameCount;
+            this.frameCount = 0;
+            this.lastFpsTime = now;
+        }
     }
 
     /**
@@ -477,13 +546,32 @@ export class GameEngine {
             // Performance
             fps: this.currentFps,
             
+            // Chart info
+            chartSource: this.currentChart?.metadata?.source || 'unknown',
+            totalNotes: this.currentChart?.notes.length || 0,
+            
             // Debug info
             debug: config.DEBUG.ENABLED ? {
                 nextNoteIndex: this.nextNoteIndex,
                 totalNotes: this.currentChart?.notes.length || 0,
-                activeNotesCount: this.activeNotes.length
+                activeNotesCount: this.activeNotes.length,
+                midiAvailable: this.midiGenerator.hasMidiData(this.currentTrack?.id)
             } : null
         };
+    }
+
+    /**
+     * Check if MIDI data is available for current track
+     */
+    hasMidiForCurrentTrack() {
+        return this.currentTrack && this.midiGenerator.hasMidiData(this.currentTrack.id);
+    }
+
+    /**
+     * Get list of tracks with MIDI data
+     */
+    getTracksWithMidi() {
+        return this.midiGenerator.getAvailableTracks();
     }
 
     /**
