@@ -1,7 +1,7 @@
 // spotify/client.js - Spotify Web API client with authentication
 
-import { PKCE } from '../auth-pkce.js';
-import { config } from '../config.js';
+import { PKCE } from './auth-pkce.js';
+import { config } from './config.js';
 
 export class SpotifyClient {
     constructor() {
