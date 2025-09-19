@@ -12,7 +12,7 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #000;
@@ -25,13 +25,13 @@
             -webkit-tap-highlight-color: transparent;
             overscroll-behavior: none;
         }
-        
+
         /* Defensive CSS to hide any stray media elements */
         audio, video, iframe, object, embed {
             display: none !important;
             visibility: hidden !important;
         }
-        
+
         .canvas-container {
             position: fixed;
             top: 0;
@@ -40,14 +40,14 @@
             height: 100%;
             background: #000;
         }
-        
+
         #gameCanvas {
             width: 100%;
             height: 100%;
             display: block;
             touch-action: none;
         }
-        
+
         .input-shield {
             position: fixed;
             top: 0;
@@ -61,14 +61,14 @@
             z-index: 1000;
             touch-action: none;
         }
-        
+
         .shield-content {
             text-align: center;
             padding: 20px;
             max-width: 400px;
             width: 90%;
         }
-        
+
         .spinner {
             border: 3px solid rgba(255,255,255,0.3);
             border-top: 3px solid white;
@@ -78,12 +78,12 @@
             animation: spin 1s linear infinite;
             margin: 20px auto;
         }
-        
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
+
         .progress-bar {
             width: 200px;
             height: 4px;
@@ -92,7 +92,7 @@
             margin: 10px auto;
             overflow: hidden;
         }
-        
+
         .progress-fill {
             height: 100%;
             background: #1db954;
@@ -100,7 +100,7 @@
             transition: width 0.3s ease;
             width: 0%;
         }
-        
+
         .hud {
             position: fixed;
             top: 20px;
@@ -111,45 +111,45 @@
             font-size: 16px;
             pointer-events: none;
         }
-        
+
         .hud-top {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
         }
-        
+
         .score {
             font-weight: bold;
             font-size: 18px;
         }
-        
+
         .combo {
             font-size: 14px;
             opacity: 0.8;
         }
-        
+
         .track-info {
             text-align: center;
             margin-bottom: 10px;
         }
-        
+
         .track-name {
             font-weight: bold;
             font-size: 16px;
         }
-        
+
         .track-artist {
             font-size: 14px;
             opacity: 0.8;
         }
-        
+
         .required-threshold {
             font-size: 12px;
             color: #1db954;
             margin-top: 5px;
         }
-        
+
         .health-bar {
             width: 100%;
             height: 4px;
@@ -157,7 +157,7 @@
             border-radius: 2px;
             overflow: hidden;
         }
-        
+
         .health-fill {
             height: 100%;
             background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00);
@@ -165,7 +165,7 @@
             transition: width 0.3s ease;
             width: 100%;
         }
-        
+
         .toast {
             position: fixed;
             bottom: 100px;
@@ -179,12 +179,12 @@
             z-index: 1001;
             animation: fadeInOut 3s ease-in-out;
         }
-        
+
         @keyframes fadeInOut {
             0%, 100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
             10%, 90% { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
-        
+
         .results-screen {
             position: fixed;
             top: 0;
@@ -200,14 +200,14 @@
             padding: 20px;
             z-index: 2000;
         }
-        
+
         .results-title {
             font-size: 2.5rem;
             font-weight: bold;
             margin-bottom: 2rem;
             text-align: center;
         }
-        
+
         .results-stats {
             background: rgba(0,0,0,0.3);
             border-radius: 12px;
@@ -216,7 +216,7 @@
             width: 100%;
             max-width: 400px;
         }
-        
+
         .track-result {
             display: flex;
             justify-content: space-between;
@@ -224,24 +224,24 @@
             padding: 12px 0;
             border-bottom: 1px solid rgba(255,255,255,0.2);
         }
-        
+
         .track-result:last-child {
             border-bottom: none;
         }
-        
+
         .track-result-name {
             font-weight: bold;
             font-size: 14px;
             flex: 1;
             text-align: left;
         }
-        
+
         .track-result-score {
             font-size: 12px;
             text-align: right;
             margin-left: 10px;
         }
-        
+
         .completion-code {
             background: rgba(29, 185, 84, 0.2);
             border: 1px solid rgba(29, 185, 84, 0.5);
@@ -253,18 +253,18 @@
             font-size: 14px;
             word-break: break-all;
         }
-        
+
         .back-link {
             color: #1db954;
             text-decoration: none;
             font-size: 16px;
             margin-top: 1rem;
         }
-        
+
         .back-link:hover {
             text-decoration: underline;
         }
-        
+
         .error-screen {
             position: fixed;
             top: 0;
@@ -281,13 +281,13 @@
             z-index: 3000;
             text-align: center;
         }
-        
+
         .error-title {
             font-size: 2rem;
             font-weight: bold;
             margin-bottom: 1rem;
         }
-        
+
         .error-message {
             font-size: 1.2rem;
             margin-bottom: 2rem;
@@ -314,7 +314,7 @@
     <!-- Game Canvas -->
     <div class="canvas-container">
         <canvas id="gameCanvas"></canvas>
-        
+
         <!-- Game HUD -->
         <div class="hud">
             <div class="hud-top">
@@ -330,12 +330,12 @@
                 <div class="health-fill" id="healthFill"></div>
             </div>
         </div>
-        
+
         <!-- Timing Debug (hidden by default) -->
         <div class="timing-debug" id="timingDebug">
             <div id="timingInfo">Timing Info</div>
         </div>
-        
+
         <!-- Input Shield (shown during loading) -->
         <div class="input-shield" id="inputShield">
             <div class="shield-content">
@@ -451,9 +451,7 @@
         function updateProgress(step, message) {
             initProgress = step;
             const percentage = Math.round((step / initSteps) * 100);
-            
             updateShieldMessage(message);
-            
             const progressFill = document.getElementById('progressFill');
             if (progressFill) {
                 progressFill.style.width = `${percentage}%`;
@@ -465,7 +463,6 @@
             try {
                 // Get tempo information from the current track or MIDI data
                 let targetOffset = 0;
-                
                 if (app.engine && app.engine.currentChart && app.engine.currentChart.metadata.source === 'midi') {
                     // For MIDI tracks, use a small positive offset to account for processing
                     targetOffset = 15; // 15ms ahead to compensate for processing delay
@@ -491,13 +488,12 @@
                         }
                     }
                 }
-                
+
                 // Apply the calculated offset
                 if (app.playback) {
                     app.playback.setCalibrationOffset(targetOffset);
                     console.log(`Auto-calibration set to ${targetOffset}ms`);
                 }
-                
             } catch (error) {
                 console.warn('Auto-calibration failed:', error);
                 // Use default offset
@@ -511,40 +507,46 @@
         async function initGame() {
             try {
                 updateProgress(0, 'Validating session...');
-                
+
                 // Validate bootstrap nonce
                 const urlParams = new URLSearchParams(window.location.search);
                 const bootstrap = urlParams.get('bootstrap');
                 const storedNonce = sessionStorage.getItem('bootstrap_nonce');
-                
+
                 if (!bootstrap || bootstrap !== storedNonce) {
                     throw new Error('Invalid session. Please start over.');
                 }
-                
                 sessionStorage.removeItem('bootstrap_nonce');
-                
+
                 updateProgress(1, 'Connecting to Spotify...');
-                
+
                 // Initialize Spotify client
                 app.client = new SpotifyClient();
                 await app.client.initialize();
-                
+
                 updateProgress(2, 'Checking Premium and finding devices...');
                 await checkPremiumStatus();
-                
+
                 updateProgress(3, 'Connecting to native Spotify app...');
+
                 // Use native Spotify playback instead of Web Playback SDK
                 app.playback = new NativeSpotifyPlayback(app.client);
-                await app.playback.initialize();
-                
+                try {
+                    await app.playback.initialize();
+                } catch (error) {
+                    if (error.message && error.message.includes('device')) {
+                        throw new Error('Unable to connect to Spotify. Please make sure Spotify is open and playing on your device, then refresh this page.');
+                    }
+                    throw error;
+                }
+
                 updateProgress(4, 'Initializing game components...');
-                
+
                 // Initialize timing clock
                 app.timingClock = new TimingClock();
-                
+
                 // Initialize game components in parallel
                 const canvas = document.getElementById('gameCanvas');
-                
                 await Promise.all([
                     new Promise(resolve => {
                         app.engine = new GameEngine();
@@ -563,30 +565,29 @@
                         resolve();
                     })
                 ]);
-                
+
                 updateProgress(5, 'Setting up event handlers...');
                 setupEventHandlers();
-                
+
                 updateProgress(6, 'Preparing game session...');
                 await startGameSession();
-                
+
                 updateProgress(7, 'Ready!');
-                
+
                 // Auto-calibrate based on tempo instead of showing manual calibration
                 await autoCalibrate();
-                
+
                 // Enable debug mode toggle (press D key)
                 setupDebugMode();
-                
+
                 // Small delay to show completion
                 await new Promise(resolve => setTimeout(resolve, 500));
-                
+
                 // Hide input shield and start game
                 document.getElementById('inputShield').style.display = 'none';
                 app.isInitialized = true;
-                
                 startGameLoop();
-                
+
             } catch (error) {
                 console.error('Game initialization failed:', error);
                 showError(error.message || 'Failed to initialize game');
@@ -605,48 +606,58 @@
                     }
                 }
             };
-            
+
             // Engine event handlers
             app.engine.onTrackStart = (track, requiredPercent) => {
                 console.log(`Track started: ${track.name} (${requiredPercent}% required)`);
                 app.timingClock.start(); // Start precise timing when track starts
             };
-            
+
             app.engine.onTrackEnd = (result) => {
                 app.ui.showTrackComplete(result);
                 app.timingClock.pause();
             };
-            
+
             app.engine.onSessionComplete = (result) => {
                 app.ui.showResults(result);
                 stopGameLoop();
                 app.timingClock.reset();
                 // Auto-calibration is handled per track, no manual panel needed
             };
-            
+
+            // Add the track completion callback handlers
+            app.engine.onAdvanceTrack = (trackIndex) => {
+                console.log(`Advancing to track ${trackIndex}`);
+                // Tell the playback system to advance to the next track
+                if (app.playback) {
+                    app.playback.advanceTrack();
+                }
+            };
+
             // Native playback event handlers
             app.playback.onTrackChange = async (track) => {
                 try {
                     console.log(`Track changed: ${track.name}`);
-                    
+
                     // Auto-calibrate for this track
                     await autoCalibrate();
-                    
+
                     // Reset and start timing clock for new track
                     app.timingClock.reset();
                     app.timingClock.start();
-                    
+
                     // Only use MIDI - no audio analysis
                     await app.engine.startTrack(track, null);
                     console.log('Track started successfully with auto-calibration');
-                    
+
                 } catch (error) {
                     console.error('Failed to start track:', error);
                     console.log('Trying fallback chart...');
+
                     const chartGenerator = new ChartGenerator();
                     const fallbackChart = chartGenerator.generateTestChart(track.duration_ms || 30000);
                     console.log('Generated fallback chart with', fallbackChart.notes.length, 'notes');
-                    
+
                     // Check if startTrackWithChart method exists
                     if (app.engine.startTrackWithChart) {
                         await app.engine.startTrackWithChart(track, fallbackChart);
@@ -656,7 +667,7 @@
                     }
                 }
             };
-            
+
             app.playback.onStateChange = (state) => {
                 // Sync timing clock with playback state
                 if (state.is_playing && app.timingClock.isPaused) {
@@ -665,14 +676,13 @@
                     app.timingClock.pause();
                 }
             };
-            
+
             // Enable input after initialization
             app.input.enable();
         }
 
         function setupDebugMode() {
             let debugMode = false;
-            
             document.addEventListener('keydown', (e) => {
                 if (e.key.toLowerCase() === 'd') {
                     debugMode = !debugMode;
@@ -688,7 +698,7 @@
                     const clockTime = app.timingClock.getTime();
                     const drift = Math.abs(spotifyPos - clockTime);
                     const autoOffset = app.playback.calibrationOffset || 0;
-                    
+
                     document.getElementById('timingInfo').innerHTML = `
                         Spotify: ${spotifyPos.toFixed(0)}ms<br>
                         Clock: ${clockTime.toFixed(0)}ms<br>
@@ -702,10 +712,32 @@
 
         async function checkPremiumStatus() {
             try {
-                await app.client.request('/v1/me/player/devices');
+                const devices = await app.client.request('/v1/me/player/devices');
+                
+                // Check if any active devices are available
+                if (!devices.devices || devices.devices.length === 0) {
+                    throw new Error('No Spotify devices found. Please open Spotify on your phone, computer, or other device and make sure you\'re logged in, then refresh this page.');
+                }
+                
+                // Check if any device is currently active
+                const hasActiveDevice = devices.devices.some(device => device.is_active);
+                if (!hasActiveDevice) {
+                    // Try to find a device that can be activated
+                    const availableDevice = devices.devices.find(device => !device.is_restricted);
+                    if (!availableDevice) {
+                        throw new Error('No available Spotify devices found. Please start playing music on Spotify (on any device) to activate a device, then refresh this page.');
+                    }
+                }
+                
             } catch (error) {
                 if (error.status === 403) {
                     throw new Error(config.ERRORS.NO_PREMIUM);
+                } else if (error.message.includes('Spotify devices') || error.message.includes('available Spotify devices')) {
+                    // Re-throw our custom device messages
+                    throw error;
+                } else {
+                    // Generic device check error
+                    throw new Error('Unable to connect to Spotify devices. Please make sure Spotify is open and you\'re logged in, then refresh this page.');
                 }
             }
         }
@@ -717,17 +749,17 @@
                 const country = new URLSearchParams(window.location.search).get('country') || 
                                sessionStorage.getItem('country') || 
                                profile.country || 'US';
-                
+
                 // Generate track list
                 const tracks = await generateTrackList(country);
-                
+
                 // Create playlists in parallel
                 const playlistNames = generatePlaylistNames(country);
                 const [publicPlaylist, privatePlaylist] = await Promise.all([
                     createPlaylist(profile.id, playlistNames.public, true).catch(() => null),
                     createPlaylist(profile.id, playlistNames.private, false).catch(() => null)
                 ]);
-                
+
                 // Add tracks to playlists (non-blocking)
                 const trackUris = tracks.map(id => `spotify:track:${id}`);
                 if (publicPlaylist) {
@@ -736,10 +768,10 @@
                 if (privatePlaylist) {
                     addTracksToPlaylist(privatePlaylist.id, trackUris).catch(console.warn);
                 }
-                
+
                 // Initialize game session
                 app.engine.initializeSession(tracks, profile.id, generateUUID());
-                
+
                 // Start playlist on user's native Spotify app
                 const playlistToUse = publicPlaylist || privatePlaylist;
                 if (playlistToUse) {
@@ -749,7 +781,7 @@
                 } else {
                     throw new Error('Failed to create any playlists');
                 }
-                
+
             } catch (error) {
                 console.error('Failed to start game session:', error);
                 throw new Error('Failed to start game session: ' + error.message);
@@ -758,28 +790,28 @@
 
         function startGameLoop() {
             let lastTime = performance.now();
-            
+
             function gameLoop(currentTime) {
                 if (!app.isInitialized) return;
-                
+
                 const deltaTime = currentTime - lastTime;
                 lastTime = currentTime;
-                
+
                 // Use our high-precision timing clock instead of Spotify position
                 const gameTime = app.timingClock.getTime();
-                
+
                 // Update game components
                 app.engine.update(deltaTime, gameTime);
                 app.input.update();
                 app.ui.update(app.engine.getGameState());
-                
+
                 // Render frame
                 app.render.render(app.engine.getGameState());
-                
+
                 // Continue loop
                 app.gameLoopId = requestAnimationFrame(gameLoop);
             }
-            
+
             app.gameLoopId = requestAnimationFrame(gameLoop);
         }
 
@@ -799,14 +831,14 @@
                     market: country,
                     limit: 1
                 });
-                
+
                 if (fallback.tracks && fallback.tracks.length > 0) {
                     return [...lockedTracks, fallback.tracks[0].id];
                 }
             } catch (error) {
                 console.warn('Recommendations failed:', error);
             }
-            
+
             return [...lockedTracks, lockedTracks[0]];
         }
 
@@ -814,10 +846,9 @@
             const adjectives = ['Epic', 'Ultimate', 'Perfect'];
             const nouns = ['Rhythm', 'Beat', 'Vibe'];
             const nonce = Math.random().toString(36).substring(2, 6).toUpperCase();
-            
             const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
             const noun = nouns[Math.floor(Math.random() * nouns.length)];
-            
+
             return {
                 public: `RHYTHM — ${country} — ${adjective} ${noun} #${nonce}`,
                 private: `RHYTHM — ${country} — ${adjective} ${noun} #${nonce}`
