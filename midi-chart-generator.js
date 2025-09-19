@@ -19,7 +19,7 @@ export class MidiChartGenerator {
 
         for (const [trackId, midiFile] of Object.entries(trackMidiMap)) {
             try {
-                const midiData = await this.loadMidiFile(`./midi/${midiFile}`);
+                const midiData = await this.loadMidiFile(`./${midiFile}`);
                 this.trackMidiData.set(trackId, midiData);
                 console.log(`Loaded MIDI for track ${trackId}: ${midiFile}`);
             } catch (error) {
