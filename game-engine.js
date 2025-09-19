@@ -510,46 +510,57 @@ export class GameEngine {
      * Complete the current track
      */
     completeCurrentTrack() {
-        if (!this.isPlaying) return;
-        
-        this.isPlaying = false;
-        
-        const gameTime = this.getCurrentGameTime();
-        const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
-        const accuracy = this.trackStats.total > 0 ? 
-            ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
-        
-        const timingStats = this.getTimingStats();
-        
-        const trackResult = {
-            trackIndex: this.currentTrackIndex,
-            trackName: this.currentTrack.name,
-            artistName: this.currentTrack.artists[0]?.name || 'Unknown',
-            playedPercent: Math.round(playedPercent * 100) / 100,
-            requiredPercent: this.requiredPercent,
-            passed: playedPercent >= this.requiredPercent,
-            accuracy: Math.round(accuracy * 100) / 100,
-            score: this.score,
-            maxCombo: this.maxCombo,
-            hitStats: { ...this.trackStats },
-            chartSource: this.currentChart?.metadata?.source || 'unknown',
-            timingStats: timingStats
-        };
-        
-        this.trackResults.push(trackResult);
-        
-        console.log(`Track completed:`, trackResult);
-        
-        if (this.onTrackEnd) {
-            this.onTrackEnd(trackResult);
-        }
-        
-        // Advance to next track
-        this.currentTrackIndex++;
-        if (this.currentTrackIndex >= this.tracks.length) {
-            this.completeSession();
-        }
+    if (!this.isPlaying) return;
+    
+    this.isPlaying = false;
+    
+    const gameTime = this.getCurrentGameTime();
+    const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
+    const accuracy = this.trackStats.total > 0 ? 
+        ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
+    
+    const timingStats = this.getTimingStats();
+    
+    const trackResult = {
+        trackIndex: this.currentTrackIndex,
+        trackName: this.currentTrack.name,
+        artistName: this.currentTrack.artists[0]?.name || 'Unknown',
+        playedPercent: Math.round(playedPercent * 100) / 100,
+        requiredPercent: this.requiredPercent,
+        passed: playedPercent >= this.requiredPercent,
+        accuracy: Math.round(accuracy * 100) / 100,
+        score: this.score,
+        maxCombo: this.maxCombo,
+        hitStats: { ...this.trackStats },
+        chartSource: this.currentChart?.metadata?.source || 'unknown',
+        timingStats: timingStats
+    };
+    
+    this.trackResults.push(trackResult);
+    
+    console.log(`Track completed:`, trackResult);
+    
+    if (this.onTrackEnd) {
+        this.onTrackEnd(trackResult);
     }
+    
+    // IMPORTANT: Advance to next track BEFORE checking completion
+    this.currentTrackIndex++;
+    
+    // Tell the playback system to advance to the next track
+    if (this.currentTrackIndex < this.tracks.length) {
+        // More tracks to play - advance the native playback
+        console.log(`Advancing to track ${this.currentTrackIndex}`);
+        
+        // Use a callback to notify the playback system
+        if (this.onAdvanceTrack) {
+            this.onAdvanceTrack(this.currentTrackIndex);
+        }
+    } else {
+        // Session complete
+        this.completeSession();
+    }
+}
 
     /**
      * Complete the entire session
