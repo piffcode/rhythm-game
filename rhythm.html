@@ -641,10 +641,16 @@
             };
 
             app.engine.onTrackEnd = (result) => {
-                app.ui.showTrackComplete(result);
-                app.timingClock.pause();
-            };
-
+    app.ui.showTrackComplete(result);
+    app.timingClock.pause();
+    
+    // ADD THESE LINES:
+    if (naturalListening.currentTrackIndex === config.NATURAL_LISTENING.SAVE_PROMPT_TRACK - 1 && 
+        naturalListening.shouldShowSavePrompt && 
+        result.currentTrack) {
+        showSavePrompt(result.currentTrack);
+    }
+};
             app.engine.onSessionComplete = (result) => {
                 app.ui.showResults(result);
                 stopGameLoop();
@@ -668,17 +674,24 @@
             };
 
             // Native playback event handlers
-            app.playback.onTrackChange = async (track) => {
-                try {
-                    console.log(`Track changed: ${track.name}`);
-                    
-                    // Check if MIDI data exists for this track - MANDATORY
-                    if (!app.engine.midiGenerator.hasMidiData(track.id)) {
-                        const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
-                        console.error(error);
-                        showError(error);
-                        return;
-                    }
+app.playback.onTrackChange = async (track) => {
+    try {
+        console.log(`Track changed: ${track.name}`);
+        
+        // Check if MIDI data exists for this track - MANDATORY
+        if (!app.engine.midiGenerator.hasMidiData(track.id)) {
+            const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
+            console.error(error);
+            showError(error);
+            return;
+        }
+
+        // ADD THESE LINES:
+        const trackDuration = track.duration_ms || 180000;
+        const currentTrackIndex = app.engine.currentTrackIndex || 0;
+        initializeNaturalListening(currentTrackIndex, trackDuration);
+        
+    }
 
                     // Auto-calibrate for this track
                     await autoCalibrate();
@@ -856,7 +869,10 @@
                 // Get current position from Spotify playback
                 let spotifyPosition = 0;
                 if (app.playback && app.playback.getIsPlaying()) {
-                    spotifyPosition = app.playback.getPositionMs();
+                    spotifyPosition = app.playback.getPositionMs();  
+                    // ADD THIS LINE:
+                checkNaturalSkip(spotifyPosition);
+                    
                 }
 
                 // Use our high-precision timing clock, but sync with Spotify periodically
