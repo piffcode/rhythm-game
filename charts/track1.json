@@ -1,0 +1,95 @@
+{
+  "title": "Locked Track 1",
+  "artist": "Demo Composer",
+  "defaultDifficulty": "NORMAL",
+  "zeroIndexed": true,
+  "metadata": {
+    "bpm": 120,
+    "description": "Sample MIDI-converted chart for testing"
+  },
+  "difficulties": {
+    "EASY": {
+      "lanes": 4,
+      "notes": [
+        { "time": 2000, "lane": 0, "type": "tap" },
+        { "time": 3500, "lane": 2, "type": "tap" },
+        { "time": 5000, "lane": 1, "type": "tap" },
+        { "time": 6500, "lane": 3, "type": "tap" },
+        { "time": 8000, "lane": 0, "type": "tap" },
+        { "time": 9500, "lane": 2, "type": "hold", "duration": 1500 },
+        { "time": 12000, "lane": 1, "type": "tap" },
+        { "time": 13500, "lane": 3, "type": "tap" },
+        { "time": 15000, "lane": 0, "type": "tap" }
+      ],
+      "metadata": {
+        "noteCount": 9
+      }
+    },
+    "NORMAL": {
+      "lanes": 4,
+      "notes": [
+        { "time": 1500, "lane": 0 },
+        { "time": 2250, "lane": 1 },
+        { "time": 3000, "lane": 2 },
+        { "time": 3750, "lane": 3 },
+        { "time": 4500, "lane": 0 },
+        { "time": 5250, "lane": 1 },
+        { "time": 6000, "lane": 2, "type": "hold", "duration": 1800 },
+        { "time": 8400, "lane": 3 },
+        { "time": 9150, "lane": 2 },
+        { "time": 9900, "lane": 1 },
+        { "time": 10650, "lane": 0 },
+        { "time": 11400, "lane": 3 },
+        { "time": 12150, "lane": 2 },
+        { "time": 12900, "lane": 1 },
+        { "time": 13650, "lane": 0 },
+        { "time": 14400, "lane": 3 },
+        { "time": 15150, "lane": 2 },
+        { "time": 15900, "lane": 1 },
+        { "time": 16650, "lane": 0 },
+        { "time": 17400, "lane": 3 }
+      ]
+    },
+    "HARD": {
+      "lanes": 4,
+      "notes": [
+        { "time": 1000, "lane": 0 },
+        { "time": 1450, "lane": 1 },
+        { "time": 1900, "lane": 2 },
+        { "time": 2350, "lane": 3 },
+        { "time": 2800, "lane": 1 },
+        { "time": 3250, "lane": 0 },
+        { "time": 3700, "lane": 2 },
+        { "time": 4150, "lane": 3 },
+        { "time": 4600, "lane": 0 },
+        { "time": 5050, "lane": 1 },
+        { "time": 5500, "lane": 2 },
+        { "time": 5950, "lane": 3 },
+        { "time": 6400, "lane": 0, "type": "hold", "duration": 2000 },
+        { "time": 8500, "lane": 1 },
+        { "time": 8950, "lane": 2 },
+        { "time": 9400, "lane": 3 },
+        { "time": 9850, "lane": 1 },
+        { "time": 10300, "lane": 0 },
+        { "time": 10750, "lane": 2 },
+        { "time": 11200, "lane": 3 },
+        { "time": 11650, "lane": 0 },
+        { "time": 12100, "lane": 1 },
+        { "time": 12550, "lane": 2 },
+        { "time": 13000, "lane": 3 },
+        { "time": 13450, "lane": 1 },
+        { "time": 13900, "lane": 0 },
+        { "time": 14350, "lane": 2 },
+        { "time": 14800, "lane": 3 },
+        { "time": 15250, "lane": 1 },
+        { "time": 15700, "lane": 0 },
+        { "time": 16150, "lane": 2 },
+        { "time": 16600, "lane": 3 },
+        { "time": 17050, "lane": 0 },
+        { "time": 17500, "lane": 1 },
+        { "time": 17950, "lane": 2 },
+        { "time": 18400, "lane": 3 }
+      ]
+    }
+  }
+}
