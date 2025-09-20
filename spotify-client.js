@@ -345,6 +345,58 @@ export class SpotifyClient {
         });
     }
 
+    // ADD THESE NEW METHODS HERE:
+    /**
+     * Save a track to the user's Liked Songs
+     * @param {string} trackId - Spotify track ID
+     * @returns {Promise<Object>} Response
+     */
+    async saveTrack(trackId) {
+        if (!trackId) {
+            throw new Error('Track ID is required');
+        }
+        
+        try {
+            const response = await this.request('/v1/me/tracks', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    ids: [trackId]
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            console.log(`Track ${trackId} saved to Liked Songs`);
+            return response;
+            
+        } catch (error) {
+            console.error('Failed to save track:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if tracks are saved in user's Liked Songs
+     * @param {string|string[]} trackIds - Track ID or array of track IDs
+     * @returns {Promise<Array>} Array of boolean values
+     */
+    async checkSavedTracks(trackIds) {
+        if (!trackIds || trackIds.length === 0) {
+            return [];
+        }
+        
+        const ids = Array.isArray(trackIds) ? trackIds.join(',') : trackIds;
+        
+        try {
+            const response = await this.request(`/v1/me/tracks/contains?ids=${ids}`);
+            return response; // Returns array of boolean values
+        } catch (error) {
+            console.error('Failed to check saved tracks:', error);
+            throw error;
+        }
+    }
+
     /**
      * Batch request helper for multiple API calls
      * @param {Array} requests - Array of request configurations
