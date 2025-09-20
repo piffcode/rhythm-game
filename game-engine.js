@@ -1,695 +1,435 @@
-// game-engine.js - Fixed game engine implementation
+// config.js - Single source of truth for all configuration
 
-import { config, generateCompletionCode } from './config.js';
-import { MidiChartGenerator } from './midi-chart-generator.js';
-import { ChartGenerator } from './game-chart.js';
-
-export class GameEngine {
-    constructor() {
-        // Game state
-        this.isInitialized = false;
-        this.isPlaying = false;
-        this.isPaused = false;
-        this.difficulty = 'NORMAL';
-        
-        // Chart generators
-        this.midiGenerator = new MidiChartGenerator(); // Fixed: use correct class name
-        this.audioChartGenerator = new ChartGenerator();
-        
-        // Session data
-        this.sessionId = null;
-        this.userId = null;
-        this.tracks = [];
-        this.currentTrackIndex = 0;
-        this.trackResults = [];
-        
-        // Current track data
-        this.currentChart = null;
-        this.currentTrack = null;
-        this.trackStartTime = 0;
-        this.trackDuration = 0;
-        this.requiredPercent = 0;
-        
-        // Timing synchronization
-        this.gameStartTime = 0;
-        this.audioStartTime = 0;
-        this.timingOffset = 0;
-        this.lastPositionSync = 0;
-        
-        // Score and combo
-        this.score = 0;
-        this.combo = 0;
-        this.maxCombo = 0;
-        this.health = config.HEALTH.STARTING;
-        
-        // Hit statistics
-        this.hitStats = {
-            perfect: 0,
-            great: 0,
-            good: 0,
-            miss: 0,
-            total: 0
-        };
-        
-        // Note tracking
-        this.activeNotes = [];
-        this.nextNoteIndex = 0;
-        this.hitNotes = new Set();
-        this.noteSpawnLookahead = 2000;
-        
-        // Performance tracking
-        this.frameCount = 0;
-        this.lastFpsTime = 0;
-        this.currentFps = 60;
-        this.averageFrameTime = 16.67;
-        
-        // Timing accuracy tracking
-        this.timingAccuracy = [];
-        this.maxTimingHistory = 100;
-        
-        // Event callbacks
-        this.onTrackStart = null;
-        this.onTrackEnd = null;
-        this.onSessionComplete = null;
-        this.onScoreUpdate = null;
-        this.onHealthUpdate = null;
-        this.onTimingUpdate = null;
+// Helper function to determine the correct redirect URI
+function getRedirectUri() {
+    // For production, use the known Vercel URL
+    if (window.location.hostname === 'rhythm-game-phi.vercel.app') {
+        return 'https://rhythm-game-phi.vercel.app/auth.html';
     }
+    
+    // For local development, construct dynamically
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+    return baseUrl + 'auth.html';
+}
 
-    /**
-     * Initialize a new game session
-     */
-    initializeSession(tracks, userId, sessionId) {
-        this.tracks = tracks;
-        this.userId = userId;
-        this.sessionId = sessionId;
-        this.currentTrackIndex = 0;
-        this.trackResults = [];
-        
-        // Reset session stats
-        this.score = 0;
-        this.combo = 0;
-        this.maxCombo = 0;
-        this.health = config.HEALTH.STARTING;
-        this.hitStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        
-        this.isInitialized = true;
-        console.log('Game session initialized with', tracks.length, 'tracks');
+export const config = {
+    // Spotify App Configuration
+    CLIENT_ID: '07f4566e6a2a4428ac68ec86d73adf34',
+    REDIRECT_URI: getRedirectUri(),
+    
+    // Alternative: hardcode your redirect URI for production
+    // REDIRECT_URI: 'https://yourdomain.com/auth.html',
+    
+    // Feature Flags
+    USE_WORKER: false,
+    DEMO_MODE: false,
+    
+    // Locked tracks for consistent gameplay
+    LOCKED_TRACK_IDS: [
+        '5FMyXeZ0reYloRTiCkPprT',  // Track 1 - Fixed
+        '0YWmeJtd7Fp1tH3978qUIH'   // Track 2 - Fixed
+    ],
+    
+    // Pool of tracks for random third selection
+    THIRD_TRACK_POOL: [
+        '4iV5W9uYEdYUVa79Axb7Rh',  // Option 1
+        '1301WleyT98MSxVHPZCA6M',  // Option 2
+        '7qiZfU4dY1lWllzX7mPBI3',  // Option 3
+        '2plbrEY59IikOBgBGLjaoe'   // Option 4
+    ],
+    
+    // Required Spotify scopes (exact string as specified)
+    SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
+    
+    // ... rest of your config remains the same
+    
+    // Gameplay Constants
+    DIFFICULTY_SETTINGS: {
+        EASY: {
+            lanes: 4,
+            approachTime: 1700,
+            baseSpeed: 0.8
+        },
+        NORMAL: {
+            lanes: 4,
+            approachTime: 1500,
+            baseSpeed: 1.0
+        },
+        HARD: {
+            lanes: 5,
+            approachTime: 1300,
+            baseSpeed: 1.2
+        }
+    },
+    
+    // Timing Windows (in milliseconds)
+    TIMING_WINDOWS: {
+        PERFECT: 45,    // ±45ms
+        GREAT: 90,      // ±90ms
+        GOOD: 135       // ±135ms
+        // Anything outside GOOD range is a MISS
+    },
+    
+    // Score Values
+    SCORING: {
+        PERFECT: 300,
+        GREAT: 200,
+        GOOD: 100,
+        MISS: 0,
+        COMBO_MULTIPLIER_MAX: 4,
+        COMBO_THRESHOLD: 10
+    },
+    
+    // Health System
+    HEALTH: {
+        STARTING: 100,
+        PERFECT_GAIN: 2,
+        GREAT_GAIN: 1,
+        GOOD_NEUTRAL: 0,
+        MISS_LOSS: 5,
+        MIN_HEALTH: 0,
+        MAX_HEALTH: 100
+    },
+    
+    // Pass Requirements
+    PASS_THRESHOLD: {
+        MIN: 85,    // Minimum 85% completion required
+        MAX: 100    // Random range: 85-100%
+    },
+    
+    // Performance Settings
+    PERFORMANCE: {
+        TARGET_FPS: 60,
+        MAX_NOTES_ON_SCREEN: 50,
+        POSITION_SMOOTHING: 0.1,
+        SEEK_THRESHOLD: 800 // ms - when to force seek if position drifts
+    },
+    
+    // Device Detection
+    DEVICE_POLLING: {
+        INTERVAL: 3000,     // 3 seconds
+        MAX_ATTEMPTS: 40,   // 120 seconds total
+        RETRY_DELAY: 1000
+    },
+    
+    // Token Management
+    TOKEN: {
+        REFRESH_BUFFER: 300000, // 5 minutes before expiry
+        RETRY_ATTEMPTS: 3,
+        RETRY_DELAY: 1000
+    },
+    
+    // Chart Generation
+    CHART: {
+        MIN_NOTE_SPACING: 100,      // Minimum ms between notes
+        HOLD_MIN_DURATION: 1200,    // Minimum duration for hold notes
+        DENSITY_MULTIPLIERS: {
+            EASY: 0.6,
+            NORMAL: 0.8,
+            HARD: 1.0
+        },
+        ENERGY_THRESHOLD: 0.6,      // Above this, increase note density
+        LOUDNESS_THRESHOLD: -10     // dB, above this, increase note density
+    },
+    
+    // Mobile Optimization
+    MOBILE: {
+        FULLSCREEN_ON_START: true,
+        LOCK_ORIENTATION: 'portrait',
+        WAKE_LOCK: true,
+        PREVENT_SCROLL: true,
+        TOUCH_BUFFER: 20 // px buffer around touch targets
+    },
+    
+    // Visual Settings
+    VISUALS: {
+        LANE_COLORS: [
+            '#ff0080',  // Pink
+            '#0080ff',  // Blue  
+            '#80ff00',  // Green
+            '#ff8000',  // Orange
+            '#8000ff'   // Purple (5th lane for Hard mode)
+        ],
+        NOTE_COLORS: {
+            NORMAL: '#ffffff',
+            HOLD: '#ffff00',
+            APPROACHING: '#cccccc'
+        },
+        HIT_EFFECTS: {
+            PERFECT: '#00ff00',
+            GREAT: '#ffff00',
+            GOOD: '#ff8000',
+            MISS: '#ff0000'
+        },
+        HIGHWAY_LENGTH: 0.8, // Percentage of screen height
+        RECEPTOR_SIZE: 60,    // px
+        NOTE_SIZE: 50        // px
+    },
+    
+    // Audio Settings
+    AUDIO: {
+        LATENCY_CALIBRATION_RANGE: 200, // ±200ms calibration range
+        DEFAULT_CALIBRATION: 0,
+        VOLUME_FADE_TIME: 500, // ms for fade in/out
+        POSITION_UPDATE_RATE: 50 // ms between position updates
+    },
+    
+    // Playlist Generation - Natural Spotify playlist names
+    PLAYLIST: {
+        REALISTIC_NAMES: [
+            'my mix',
+            'current rotation',
+            'on repeat',
+            'lately',
+            'vibes',
+            'summer nights',
+            'drive music',
+            'good stuff',
+            'favorites',
+            'new finds',
+            'mood',
+            'chill mix',
+            'bangers',
+            'late night',
+            'feel good',
+            'weekend',
+            'daily driver',
+            'fresh',
+            'liked songs pt. 2',
+            'study vibes',
+            'workout',
+            'road trip',
+            'throwbacks',
+            'hits different',
+            'no skips',
+            'that playlist',
+            'main character energy',
+            'gym',
+            'car songs',
+            'rain day',
+            'golden hour',
+            'untitled',
+            '✨ vibes ✨',
+            'idc what anyone says',
+            'songs i fw',
+            'this month',
+            'lowkey fire',
+            'comfort songs',
+            'winter feels'
+        ]
+    },
+    
+    // Artist Configuration for 3rd Track
+    FEATURED_ARTISTS: {
+        DRAKE: {
+            name: 'Drake',
+            id: '3TVXtAsR1Inumwj472S9r4'
+        },
+        CENTRAL_CEE: {
+            name: 'Central Cee',  
+            id: '3YQKmKGau6dqQvXkqWaUOc'
+        }
+    },
+    
+    // Error Messages
+    ERRORS: {
+        NO_PREMIUM: 'Spotify Premium required to play.',
+        NO_DEVICE: 'No active device found. Open Spotify, start any song, return here, then press Start.',
+        CONTROLS_LOCKED: 'Playback controls are locked during a session.',
+        AUTH_FAILED: 'Authentication failed. Please try again.',
+        SESSION_EXPIRED: 'Session expired. Please log in again.',
+        NETWORK_ERROR: 'Network error. Please check your connection.',
+        PLAYBACK_ERROR: 'Playback error. Please try again.',
+        INVALID_SESSION: 'Invalid session. Please start over.'
+    },
+    
+    // Debug Settings (only for development)
+    DEBUG: {
+        ENABLED: false,
+        LOG_TIMING: false,
+        LOG_INPUT: false,
+        LOG_CHART: false,
+        SHOW_FPS: false,
+        SHOW_HITBOXES: false
     }
+};
 
-    /**
-     * Start a new track with improved timing synchronization
-     */
-    async startTrack(trackData, audioAnalysis = null) {
-        this.currentTrack = trackData;
-        this.trackDuration = trackData.duration_ms;
-        this.requiredPercent = this.getRandomPassThreshold();
+// Helper function to get final track list with random third track
+export function getFinalTrackList() {
+    const fixedTracks = [...config.LOCKED_TRACK_IDS];
+    const randomThirdTrack = config.THIRD_TRACK_POOL[Math.floor(Math.random() * config.THIRD_TRACK_POOL.length)];
+    
+    console.log(`Selected random third track: ${randomThirdTrack}`);
+    return [...fixedTracks, randomThirdTrack];
+}
+
+// Validation function to check if required config is set
+export function validateConfig() {
+    const errors = [];
+    
+    if (!config.CLIENT_ID || config.CLIENT_ID === '07f4566e6a2a4428ac68ec86d73adf34') {
+        errors.push('CLIENT_ID must be set to your Spotify application client ID');
+    }
+    
+    if (config.LOCKED_TRACK_IDS.length !== 2) {
+        errors.push('LOCKED_TRACK_IDS must contain exactly 2 track IDs');
+    }
+    
+    if (config.THIRD_TRACK_POOL.length !== 4) {
+        errors.push('THIRD_TRACK_POOL must contain exactly 4 track IDs');
+    }
+    
+    if (!config.REDIRECT_URI) {
+        errors.push('REDIRECT_URI must be configured');
+    }
+    
+    return errors;
+}
+
+// Helper function to get difficulty settings
+export function getDifficultySettings(difficulty = 'NORMAL') {
+    return config.DIFFICULTY_SETTINGS[difficulty] || config.DIFFICULTY_SETTINGS.NORMAL;
+}
+
+// Helper function to calculate score with combo
+export function calculateScore(hitType, combo) {
+    const baseScore = config.SCORING[hitType] || 0;
+    const comboMultiplier = Math.min(
+        1 + Math.floor(combo / config.SCORING.COMBO_THRESHOLD) * 0.1,
+        config.SCORING.COMBO_MULTIPLIER_MAX
+    );
+    return Math.floor(baseScore * comboMultiplier);
+}
+
+// Helper function to generate natural playlist names
+export function generatePlaylistNames() {
+    const names = config.PLAYLIST.REALISTIC_NAMES;
+    
+    // Just pick a random name from the realistic options
+    const selectedName = names[Math.floor(Math.random() * names.length)];
+    
+    return {
+        public: selectedName,
+        private: selectedName, // Same name for both
+        description: '' // No description
+    };
+}
+
+// Helper function to find Drake/Central Cee track matching audio features
+export async function findMatchingArtistTrack(client, referenceFeatures, country) {
+    const artists = [config.FEATURED_ARTISTS.DRAKE, config.FEATURED_ARTISTS.CENTRAL_CEE];
+    const selectedArtist = artists[Math.floor(Math.random() * artists.length)];
+    
+    try {
+        // Get artist's top tracks first
+        const topTracks = await client.request(`/v1/artists/${selectedArtist.id}/top-tracks?market=${country}`);
         
-        // Reset timing for new track
-        this.gameStartTime = performance.now();
-        this.audioStartTime = 0;
-        this.lastPositionSync = 0;
+        if (!topTracks.tracks || topTracks.tracks.length === 0) {
+            throw new Error('No tracks found for artist');
+        }
         
-        // Try MIDI chart first, then audio analysis, then fallback
+        // Get a few random tracks from their catalog via search
+        const searchQuery = `artist:${selectedArtist.name}`;
+        const searchResults = await client.request(`/v1/search?q=${encodeURIComponent(searchQuery)}&type=track&market=${country}&limit=50`);
+        
+        // Combine top tracks and search results
+        const allTracks = [...topTracks.tracks];
+        if (searchResults.tracks && searchResults.tracks.items) {
+            allTracks.push(...searchResults.tracks.items);
+        }
+        
+        // Remove duplicates
+        const uniqueTracks = allTracks.filter((track, index, self) => 
+            index === self.findIndex(t => t.id === track.id)
+        );
+        
+        if (uniqueTracks.length === 0) {
+            throw new Error('No unique tracks found');
+        }
+        
+        // Get audio features for a random selection of tracks (max 10 to avoid rate limits)
+        const tracksToAnalyze = uniqueTracks
+            .sort(() => 0.5 - Math.random())
+            .slice(0, Math.min(10, uniqueTracks.length));
+        
+        const trackIds = tracksToAnalyze.map(t => t.id).join(',');
+        const features = await client.request(`/v1/audio-features?ids=${trackIds}`);
+        
+        if (!features.audio_features) {
+            throw new Error('No audio features returned');
+        }
+        
+        // Find the best match based on audio features
+        let bestMatch = null;
+        let bestScore = Infinity;
+        
+        features.audio_features.forEach((trackFeatures, index) => {
+            if (!trackFeatures) return;
+            
+            // Calculate similarity score (lower is better)
+            const energyDiff = Math.abs(trackFeatures.energy - referenceFeatures.energy);
+            const danceabilityDiff = Math.abs(trackFeatures.danceability - referenceFeatures.danceability);
+            const valenceDiff = Math.abs(trackFeatures.valence - referenceFeatures.valence);
+            const tempoDiff = Math.abs(trackFeatures.tempo - referenceFeatures.tempo) / 200; // normalize tempo
+            
+            const totalScore = energyDiff + danceabilityDiff + valenceDiff + tempoDiff;
+            
+            if (totalScore < bestScore) {
+                bestScore = totalScore;
+                bestMatch = tracksToAnalyze[index];
+            }
+        });
+        
+        if (bestMatch) {
+            console.log(`Selected ${selectedArtist.name} track: ${bestMatch.name} (similarity score: ${bestScore.toFixed(3)})`);
+            return bestMatch.id;
+        }
+        
+        // Fallback: return a random track from the artist
+        const randomTrack = uniqueTracks[Math.floor(Math.random() * uniqueTracks.length)];
+        console.log(`Fallback: Selected random ${selectedArtist.name} track: ${randomTrack.name}`);
+        return randomTrack.id;
+        
+    } catch (error) {
+        console.warn(`Failed to find ${selectedArtist.name} track:`, error);
+        
+        // Ultimate fallback: try the other artist
+        const otherArtist = artists.find(a => a.id !== selectedArtist.id);
         try {
-            if (this.midiGenerator.hasMidiData(trackData.id)) {
-                console.log(`Using MIDI chart for track: ${trackData.name}`);
-                this.currentChart = this.midiGenerator.generateChartFromMidi(trackData.id, this.difficulty);
-            } else if (audioAnalysis) {
-                console.log(`Using audio analysis chart for track: ${trackData.name}`);
-                this.currentChart = this.audioChartGenerator.generateChart(audioAnalysis, this.difficulty);
-            } else {
-                console.log(`Using fallback test chart for track: ${trackData.name}`);
-                this.currentChart = this.audioChartGenerator.generateTestChart(this.trackDuration, this.difficulty);
+            const fallbackTracks = await client.request(`/v1/artists/${otherArtist.id}/top-tracks?market=${country}`);
+            if (fallbackTracks.tracks && fallbackTracks.tracks.length > 0) {
+                const randomTrack = fallbackTracks.tracks[Math.floor(Math.random() * fallbackTracks.tracks.length)];
+                console.log(`Fallback: Selected ${otherArtist.name} track: ${randomTrack.name}`);
+                return randomTrack.id;
             }
-        } catch (error) {
-            console.error('Chart generation failed:', error);
-            // Ultimate fallback
-            this.currentChart = this.audioChartGenerator.generateTestChart(this.trackDuration, this.difficulty);
+        } catch (fallbackError) {
+            console.warn(`Fallback also failed:`, fallbackError);
         }
         
-        // Reset track-specific state
-        this.resetTrackState();
-        
-        this.isPlaying = true;
-        
-        console.log(`Started track: ${trackData.name} (${this.requiredPercent}% required, ${this.currentChart.notes.length} notes)`);
-        
-        if (this.onTrackStart) {
-            this.onTrackStart(trackData, this.requiredPercent);
-        }
-    }
-
-    /**
-     * Reset state for new track
-     */
-    resetTrackState() {
-        this.activeNotes = [];
-        this.nextNoteIndex = 0;
-        this.hitNotes.clear();
-        
-        // Reset per-track stats
-        this.trackStats = { perfect: 0, great: 0, good: 0, miss: 0, total: 0 };
-        
-        // Clear timing accuracy history
-        this.timingAccuracy = [];
-    }
-
-    /**
-     * Synchronize game time with audio playback
-     */
-    syncWithAudioTime(audioPositionMs) {
-        const now = performance.now();
-        
-        if (this.audioStartTime === 0) {
-            // First sync - establish baseline
-            this.audioStartTime = now - audioPositionMs;
-            this.lastPositionSync = now;
-        } else {
-            // Check for drift and resync if necessary
-            const expectedAudioTime = now - this.audioStartTime;
-            const drift = Math.abs(expectedAudioTime - audioPositionMs);
-            
-            if (drift > 100) { // More than 100ms drift
-                console.log(`Audio drift detected: ${drift.toFixed(0)}ms, resyncing...`);
-                this.audioStartTime = now - audioPositionMs;
-            }
-            
-            this.lastPositionSync = now;
-        }
-    }
-
-    /**
-     * Get current game time with high precision
-     */
-    getCurrentGameTime() {
-        if (this.audioStartTime === 0) {
-            return 0;
-        }
-        
-        const elapsed = performance.now() - this.audioStartTime;
-        return elapsed + this.timingOffset;
-    }
-
-    /**
-     * Set timing calibration offset
-     */
-    setTimingOffset(offsetMs) {
-        this.timingOffset = offsetMs;
-        console.log(`Timing offset set to ${offsetMs}ms`);
-    }
-
-    /**
-     * Main update loop with improved timing
-     */
-    update(deltaTime, audioPositionMs = null) {
-        if (!this.isInitialized || !this.isPlaying) return;
-        
-        this.updatePerformanceMetrics(deltaTime);
-        
-        // Sync with audio position if provided
-        if (audioPositionMs !== null) {
-            this.syncWithAudioTime(audioPositionMs);
-        }
-        
-        // Get current game time
-        const gameTime = this.getCurrentGameTime();
-        
-        // Spawn new notes with lookahead
-        this.spawnNotes(gameTime);
-        
-        // Update active notes
-        this.updateNotes(gameTime, deltaTime);
-        
-        // Check for missed notes
-        this.checkMissedNotes(gameTime);
-        
-        // Check for track completion
-        this.checkTrackCompletion(gameTime);
-        
-        // Update timing callback if available
-        if (this.onTimingUpdate) {
-            this.onTimingUpdate({
-                gameTime: gameTime,
-                audioTime: audioPositionMs,
-                drift: audioPositionMs ? Math.abs(gameTime - audioPositionMs) : 0,
-                offset: this.timingOffset
-            });
-        }
-    }
-
-    /**
-     * Spawn notes with improved lookahead
-     */
-    spawnNotes(gameTime) {
-        if (!this.currentChart) return;
-        
-        const approachTime = config.DIFFICULTY_SETTINGS[this.difficulty].approachTime;
-        const spawnTime = gameTime + this.noteSpawnLookahead;
-        
-        while (this.nextNoteIndex < this.currentChart.notes.length) {
-            const note = this.currentChart.notes[this.nextNoteIndex];
-            
-            if (note.time <= spawnTime) {
-                // Create active note with precise timing
-                const activeNote = {
-                    ...note,
-                    id: this.nextNoteIndex,
-                    spawned: true,
-                    spawnTime: gameTime,
-                    isHit: false,
-                    progress: 0
-                };
-                
-                this.activeNotes.push(activeNote);
-                this.nextNoteIndex++;
-            } else {
-                break;
-            }
-        }
-    }
-
-    /**
-     * Update note positions and states
-     */
-    updateNotes(gameTime, deltaTime) {
-        const approachTime = config.DIFFICULTY_SETTINGS[this.difficulty].approachTime;
-        
-        // Update positions and remove old notes
-        this.activeNotes = this.activeNotes.filter(note => {
-            const timeDiff = note.time - gameTime;
-            const missWindow = config.TIMING_WINDOWS.GOOD;
-            
-            // Remove notes that are too far past
-            if (timeDiff < -missWindow - 200) {
-                return false;
-            }
-            
-            // Calculate progress (0 = spawned, 1 = at hit line)
-            const totalTime = this.noteSpawnLookahead;
-            const elapsed = gameTime - note.spawnTime;
-            note.progress = Math.max(0, Math.min(1, elapsed / totalTime));
-            
-            return true;
-        });
-    }
-
-    /**
-     * Check for missed notes with precise timing
-     */
-    checkMissedNotes(gameTime) {
-        const missThreshold = config.TIMING_WINDOWS.GOOD;
-        
-        this.activeNotes.forEach(note => {
-            if (!note.isHit && !this.hitNotes.has(note.id)) {
-                const timeDiff = gameTime - note.time;
-                
-                if (timeDiff > missThreshold) {
-                    this.processHit(note, 'MISS', timeDiff);
-                    this.hitNotes.add(note.id);
-                    note.isHit = true;
-                }
-            }
-        });
-    }
-
-    /**
-     * Handle player input with precise timing analysis
-     */
-    handleLaneHit(laneIndex, inputTime = null) {
-        if (!this.isPlaying) return null;
-        
-        const currentTime = inputTime || this.getCurrentGameTime();
-        let bestNote = null;
-        let bestTimeDiff = Infinity;
-        
-        // Find the best note to hit in this lane
-        this.activeNotes.forEach(note => {
-            if (note.lane === laneIndex && !note.isHit && !this.hitNotes.has(note.id)) {
-                const timeDiff = Math.abs(currentTime - note.time);
-                
-                if (timeDiff < bestTimeDiff && timeDiff <= config.TIMING_WINDOWS.GOOD) {
-                    bestNote = note;
-                    bestTimeDiff = timeDiff;
-                }
-            }
-        });
-        
-        if (bestNote) {
-            // Calculate actual timing difference (positive = late, negative = early)
-            const actualTimeDiff = currentTime - bestNote.time;
-            const hitResult = this.calculateHitResult(Math.abs(actualTimeDiff));
-            
-            this.processHit(bestNote, hitResult, actualTimeDiff);
-            
-            // Track timing accuracy
-            this.recordTimingAccuracy(actualTimeDiff);
-            
-            return {
-                hitType: hitResult,
-                score: this.calculateScoreGain(hitResult),
-                combo: this.combo,
-                timingDiff: actualTimeDiff,
-                note: bestNote
-            };
-        }
-        
+        // Return null if everything fails
         return null;
     }
-
-    /**
-     * Record timing accuracy for analysis
-     */
-    recordTimingAccuracy(timeDiff) {
-        this.timingAccuracy.push(timeDiff);
-        
-        if (this.timingAccuracy.length > this.maxTimingHistory) {
-            this.timingAccuracy.shift();
-        }
-    }
-
-    /**
-     * Get timing statistics
-     */
-    getTimingStats() {
-        if (this.timingAccuracy.length === 0) {
-            return { averageOffset: 0, standardDeviation: 0, accuracy: 0 };
-        }
-        
-        const sum = this.timingAccuracy.reduce((a, b) => a + b, 0);
-        const average = sum / this.timingAccuracy.length;
-        
-        const variance = this.timingAccuracy.reduce((sum, diff) => {
-            return sum + Math.pow(diff - average, 2);
-        }, 0) / this.timingAccuracy.length;
-        
-        const standardDeviation = Math.sqrt(variance);
-        
-        // Calculate accuracy as percentage of hits within perfect window
-        const perfectHits = this.timingAccuracy.filter(diff => 
-            Math.abs(diff) <= config.TIMING_WINDOWS.PERFECT
-        ).length;
-        
-        const accuracy = (perfectHits / this.timingAccuracy.length) * 100;
-        
-        return {
-            averageOffset: Math.round(average),
-            standardDeviation: Math.round(standardDeviation),
-            accuracy: Math.round(accuracy),
-            totalHits: this.timingAccuracy.length
-        };
-    }
-
-    /**
-     * Calculate hit result based on timing difference
-     */
-    calculateHitResult(timeDiff) {
-        if (timeDiff <= config.TIMING_WINDOWS.PERFECT) {
-            return 'PERFECT';
-        } else if (timeDiff <= config.TIMING_WINDOWS.GREAT) {
-            return 'GREAT';
-        } else if (timeDiff <= config.TIMING_WINDOWS.GOOD) {
-            return 'GOOD';
-        } else {
-            return 'MISS';
-        }
-    }
-
-    /**
-     * Calculate score gain for hit result
-     */
-    calculateScoreGain(hitResult) {
-        const baseScore = config.SCORING[hitResult] || 0;
-        const comboMultiplier = Math.min(
-            1 + Math.floor(this.combo / config.SCORING.COMBO_THRESHOLD) * 0.1,
-            config.SCORING.COMBO_MULTIPLIER_MAX
-        );
-        return Math.floor(baseScore * comboMultiplier);
-    }
-
-    /**
-     * Process a hit with improved feedback
-     */
-    processHit(note, hitResult, timeDiff) {
-        note.isHit = true;
-        this.hitNotes.add(note.id);
-        
-        // Update statistics
-        this.hitStats[hitResult.toLowerCase()]++;
-        this.hitStats.total++;
-        this.trackStats[hitResult.toLowerCase()]++;
-        this.trackStats.total++;
-        
-        // Update combo
-        if (hitResult !== 'MISS') {
-            this.combo++;
-            this.maxCombo = Math.max(this.maxCombo, this.combo);
-        } else {
-            this.combo = 0;
-        }
-        
-        // Calculate score
-        const scoreGain = this.calculateScoreGain(hitResult);
-        this.score += scoreGain;
-        
-        // Update health
-        this.updateHealth(hitResult);
-        
-        // Trigger callbacks
-        if (this.onScoreUpdate) {
-            this.onScoreUpdate({
-                score: this.score,
-                combo: this.combo,
-                hitResult,
-                scoreGain,
-                timingDiff: timeDiff
-            });
-        }
-    }
-
-    /**
-     * Update health based on hit result
-     */
-    updateHealth(hitResult) {
-        const oldHealth = this.health;
-        
-        switch (hitResult) {
-            case 'PERFECT':
-                this.health = Math.min(config.HEALTH.MAX_HEALTH, 
-                                     this.health + config.HEALTH.PERFECT_GAIN);
-                break;
-            case 'GREAT':
-                this.health = Math.min(config.HEALTH.MAX_HEALTH, 
-                                     this.health + config.HEALTH.GREAT_GAIN);
-                break;
-            case 'GOOD':
-                break; // Neutral
-            case 'MISS':
-                this.health = Math.max(config.HEALTH.MIN_HEALTH, 
-                                     this.health - config.HEALTH.MISS_LOSS);
-                break;
-        }
-        
-        if (this.health !== oldHealth && this.onHealthUpdate) {
-            this.onHealthUpdate(this.health);
-        }
-    }
-
-    /**
-     * Check if current track is complete
-     */
-    checkTrackCompletion(gameTime) {
-        const playedPercent = (gameTime / this.trackDuration) * 100;
-        
-        if (playedPercent >= this.requiredPercent) {
-            this.completeCurrentTrack();
-        }
-    }
-
-    /**
-     * Complete the current track
-     */
-    completeCurrentTrack() {
-    if (!this.isPlaying) return;
-    
-    this.isPlaying = false;
-    
-    const gameTime = this.getCurrentGameTime();
-    const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
-    const accuracy = this.trackStats.total > 0 ? 
-        ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
-    
-    const timingStats = this.getTimingStats();
-    
-    const trackResult = {
-        trackIndex: this.currentTrackIndex,
-        trackName: this.currentTrack.name,
-        artistName: this.currentTrack.artists[0]?.name || 'Unknown',
-        playedPercent: Math.round(playedPercent * 100) / 100,
-        requiredPercent: this.requiredPercent,
-        passed: playedPercent >= this.requiredPercent,
-        accuracy: Math.round(accuracy * 100) / 100,
-        score: this.score,
-        maxCombo: this.maxCombo,
-        hitStats: { ...this.trackStats },
-        chartSource: this.currentChart?.metadata?.source || 'unknown',
-        timingStats: timingStats
-    };
-    
-    this.trackResults.push(trackResult);
-    
-    console.log(`Track completed:`, trackResult);
-    
-    if (this.onTrackEnd) {
-        this.onTrackEnd(trackResult);
-    }
-    
-    // IMPORTANT: Advance to next track BEFORE checking completion
-    this.currentTrackIndex++;
-    
-    // Tell the playback system to advance to the next track
-    if (this.currentTrackIndex < this.tracks.length) {
-        // More tracks to play - advance the native playback
-        console.log(`Advancing to track ${this.currentTrackIndex}`);
-        
-        // Use a callback to notify the playback system
-        if (this.onAdvanceTrack) {
-            this.onAdvanceTrack(this.currentTrackIndex);
-        }
-    } else {
-        // Session complete
-        this.completeSession();
-    }
 }
 
-    /**
-     * Complete the entire session
-     */
-    completeSession() {
-        const completionCode = generateCompletionCode(this.userId, this.sessionId);
-        
-        const overallTimingStats = this.getTimingStats();
-        
-        const sessionResult = {
-            completionCode,
-            trackResults: this.trackResults,
-            totalScore: this.score,
-            totalMaxCombo: this.maxCombo,
-            overallAccuracy: this.calculateOverallAccuracy(),
-            sessionStats: { ...this.hitStats },
-            timingStats: overallTimingStats,
-            midiTracksUsed: this.trackResults.filter(r => r.chartSource === 'midi').length
-        };
-        
-        console.log('Session completed:', sessionResult);
-        
-        if (this.onSessionComplete) {
-            this.onSessionComplete(sessionResult);
-        }
+// Helper function to generate completion code
+export function generateCompletionCode(userId, sessionNonce) {
+    const today = new Date();
+    const dateStr = today.getFullYear() + 
+                   String(today.getMonth() + 1).padStart(2, '0') + 
+                   String(today.getDate()).padStart(2, '0');
+    
+    // Simple hash function for demo purposes
+    const hashInput = userId + sessionNonce + dateStr;
+    let hash = 0;
+    for (let i = 0; i < hashInput.length; i++) {
+        const char = hashInput.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
     }
-
-    /**
-     * Calculate overall accuracy
-     */
-    calculateOverallAccuracy() {
-        if (this.hitStats.total === 0) return 0;
-        
-        const successfulHits = this.hitStats.perfect + this.hitStats.great + this.hitStats.good;
-        return Math.round((successfulHits / this.hitStats.total) * 10000) / 100;
-    }
-
-    /**
-     * Update performance metrics
-     */
-    updatePerformanceMetrics(deltaTime) {
-        this.frameCount++;
-        this.averageFrameTime = (this.averageFrameTime * 0.9) + (deltaTime * 0.1);
-        
-        const now = Date.now();
-        if (now - this.lastFpsTime >= 1000) {
-            this.currentFps = this.frameCount;
-            this.frameCount = 0;
-            this.lastFpsTime = now;
-        }
-    }
-
-    /**
-     * Get random pass threshold
-     */
-    getRandomPassThreshold() {
-        const min = config.PASS_THRESHOLD.MIN;
-        const max = config.PASS_THRESHOLD.MAX;
-        return Math.floor(Math.random() * (max - min + 1)) + min;
-    }
-
-    /**
-     * Get current game state for rendering
-     */
-    getGameState() {
-        return {
-            isPlaying: this.isPlaying,
-            isPaused: this.isPaused,
-            difficulty: this.difficulty,
-            
-            // Track info
-            currentTrack: this.currentTrack,
-            currentTrackIndex: this.currentTrackIndex,
-            totalTracks: this.tracks.length,
-            requiredPercent: this.requiredPercent,
-            
-            // Timing
-            gameTime: this.getCurrentGameTime(),
-            trackDuration: this.trackDuration,
-            playedPercent: this.trackDuration > 0 ? (this.getCurrentGameTime() / this.trackDuration) * 100 : 0,
-            
-            // Score and stats
-            score: this.score,
-            combo: this.combo,
-            maxCombo: this.maxCombo,
-            health: this.health,
-            hitStats: { ...this.hitStats },
-            timingStats: this.getTimingStats(),
-            
-            // Notes
-            activeNotes: [...this.activeNotes],
-            
-            // Visual settings
-            lanes: config.DIFFICULTY_SETTINGS[this.difficulty].lanes,
-            approachTime: config.DIFFICULTY_SETTINGS[this.difficulty].approachTime,
-            
-            // Performance
-            fps: this.currentFps,
-            averageFrameTime: this.averageFrameTime,
-            
-            // Chart info
-            chartSource: this.currentChart?.metadata?.source || 'unknown',
-            totalNotes: this.currentChart?.notes.length || 0,
-            
-            // Debug info
-            debug: config.DEBUG.ENABLED ? {
-                nextNoteIndex: this.nextNoteIndex,
-                activeNotesCount: this.activeNotes.length,
-                midiAvailable: this.midiGenerator.hasMidiData(this.currentTrack?.id),
-                timingOffset: this.timingOffset,
-                audioStartTime: this.audioStartTime
-            } : null
-        };
-    }
-
-    /**
-     * Get random pass threshold
-     */
-    getRandomPassThreshold() {
-        const min = config.PASS_THRESHOLD.MIN;
-        const max = config.PASS_THRESHOLD.MAX;
-        return Math.floor(Math.random() * (max - min + 1)) + min;
-    }
-
-    // Additional methods...
-    pause() { this.isPaused = true; this.isPlaying = false; }
-    resume() { this.isPaused = false; this.isPlaying = true; }
-    reset() { /* reset implementation */ }
-    setDifficulty(difficulty) { this.difficulty = difficulty; }
-    hasMidiForCurrentTrack() { return this.currentTrack && this.midiGenerator.hasMidiData(this.currentTrack.id); }
-    getTracksWithMidi() { return this.midiGenerator.getAvailableTracks(); }
+    
+    const hashStr = Math.abs(hash).toString(36).toUpperCase().substring(0, 8);
+    return `RHYTHM-${dateStr}-${hashStr}`;
 }
+
+// Export default for convenience
+export default config;
