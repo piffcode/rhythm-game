@@ -5,6 +5,22 @@ import { config } from './config.js';
 export class MidiChartGenerator {
     constructor() {
         this.trackMidiData = new Map();
+        this.trackJsonCharts = new Map();
+
+        // Mapping between Spotify track IDs and pre-generated chart files
+        this.jsonChartMap = {
+            '5FMyXeZ0reYloRTiCkPprT': 'charts/track1.json',
+            '0YWmeJtd7Fp1tH3978qUIH': 'charts/track2.json'
+        };
+
+        // Maintain MIDI map for backwards compatibility / fallback support
+        this.midiTrackMap = {
+            '5FMyXeZ0reYloRTiCkPprT': 'track1.mid',
+            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid'
+        };
+
+        // Begin loading available chart resources
+        this.loadJsonCharts();
         this.loadMidiFiles();
     }
 
@@ -12,12 +28,7 @@ export class MidiChartGenerator {
      * Load MIDI files for locked tracks
      */
     async loadMidiFiles() {
-        const trackMidiMap = {
-            '5FMyXeZ0reYloRTiCkPprT': 'track1.mid',
-            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid'
-        };
-
-        for (const [trackId, midiFile] of Object.entries(trackMidiMap)) {
+        for (const [trackId, midiFile] of Object.entries(this.midiTrackMap)) {
             try {
                 const midiData = await this.loadMidiFile(`./${midiFile}`);
                 this.trackMidiData.set(trackId, midiData);
@@ -25,6 +36,62 @@ export class MidiChartGenerator {
             } catch (error) {
                 console.warn(`Failed to load MIDI for ${trackId}:`, error);
             }
+        }
+    }
+
+    /**
+     * Load JSON charts generated from MIDI maps
+     */
+    async loadJsonCharts() {
+        for (const [trackId, chartFile] of Object.entries(this.jsonChartMap)) {
+            try {
+                const chartData = await this.loadJsonChart(`./${chartFile}`);
+                this.trackJsonCharts.set(trackId, chartData);
+                console.log(`Loaded JSON chart for track ${trackId}: ${chartFile}`);
+            } catch (error) {
+                console.warn(`Failed to load JSON chart for ${trackId}:`, error);
+            }
+        }
+    }
+
+    /**
+     * Fetch and parse a JSON chart file
+     */
+    async loadJsonChart(url) {
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const chartJson = await response.json();
+            this.validateJsonStructure(chartJson, url);
+            return chartJson;
+        } catch (error) {
+            throw new Error(`Failed to load JSON chart ${url}: ${error.message}`);
+        }
+    }
+
+    /**
+     * Basic validation to ensure the JSON chart has expected structure
+     */
+    validateJsonStructure(chartJson, url) {
+        if (!chartJson || typeof chartJson !== 'object') {
+            throw new Error(`Chart ${url} is not a valid JSON object`);
+        }
+
+        if (chartJson.difficulties) {
+            const difficulties = chartJson.difficulties;
+            if (typeof difficulties !== 'object' || Object.keys(difficulties).length === 0) {
+                throw new Error(`Chart ${url} has an empty difficulties map`);
+            }
+
+            const hasNotes = Object.values(difficulties).some(diff => Array.isArray(diff?.notes));
+            if (!hasNotes) {
+                throw new Error(`Chart ${url} is missing note data in difficulties`);
+            }
+        } else if (!Array.isArray(chartJson.notes)) {
+            throw new Error(`Chart ${url} must contain a notes array or a difficulties object`);
         }
     }
 
@@ -446,6 +513,18 @@ export class MidiChartGenerator {
      * Generate rhythm game chart from MIDI with improved note conversion
      */
     generateChartFromMidi(trackId, difficulty = 'NORMAL') {
+        const jsonChart = this.trackJsonCharts.get(trackId);
+        if (jsonChart) {
+            try {
+                const chart = this.buildChartFromJson(jsonChart, trackId, difficulty);
+                console.log(`Loaded JSON chart for track ${trackId} (${chart.difficulty})`);
+                return chart;
+            } catch (error) {
+                console.warn(`Failed to build chart from JSON for ${trackId}:`, error);
+                // Fall through to MIDI processing if available
+            }
+        }
+
         const midiData = this.trackMidiData.get(trackId);
         if (!midiData) {
             throw new Error(`No MIDI data found for track ${trackId}`);
@@ -494,6 +573,167 @@ export class MidiChartGenerator {
 
         console.log(`Final MIDI chart: ${chart.metadata.totalNotes} notes, ${chart.metadata.holdNotes} holds`);
         return chart;
+    }
+
+    /**
+     * Convert a pre-generated JSON chart into runtime format
+     */
+    buildChartFromJson(chartJson, trackId, requestedDifficulty) {
+        const difficultyKeys = chartJson.difficulties ? Object.keys(chartJson.difficulties) : [];
+
+        let selectedDifficulty = requestedDifficulty;
+        let chartSource = null;
+
+        if (chartJson.difficulties) {
+            const resolveDifficulty = (key) => {
+                if (!key) return null;
+                if (chartJson.difficulties[key]) {
+                    return { key, data: chartJson.difficulties[key] };
+                }
+
+                const matchKey = difficultyKeys.find(name => name.toLowerCase() === key.toLowerCase());
+                if (matchKey) {
+                    return { key: matchKey, data: chartJson.difficulties[matchKey] };
+                }
+
+                return null;
+            };
+
+            const requested = resolveDifficulty(requestedDifficulty);
+            if (requested) {
+                selectedDifficulty = requested.key;
+                chartSource = requested.data;
+            }
+
+            if (!chartSource && chartJson.defaultDifficulty) {
+                const defaultDiff = resolveDifficulty(chartJson.defaultDifficulty);
+                if (defaultDiff) {
+                    selectedDifficulty = defaultDiff.key;
+                    chartSource = defaultDiff.data;
+                }
+            }
+
+            if (!chartSource && difficultyKeys.length > 0) {
+                selectedDifficulty = difficultyKeys[0];
+                chartSource = chartJson.difficulties[selectedDifficulty];
+            }
+        } else {
+            chartSource = chartJson;
+            selectedDifficulty = requestedDifficulty;
+        }
+
+        if (!chartSource || !Array.isArray(chartSource.notes)) {
+            throw new Error('JSON chart is missing note data');
+        }
+
+        const difficultySettings = config.DIFFICULTY_SETTINGS[selectedDifficulty] || config.DIFFICULTY_SETTINGS[requestedDifficulty] || config.DIFFICULTY_SETTINGS.NORMAL;
+        const lanes = chartSource.lanes || chartJson.lanes || difficultySettings.lanes || 4;
+
+        const zeroIndexed = chartSource.zeroIndexed ?? chartJson.zeroIndexed ?? true;
+
+        const normalizedNotes = chartSource.notes
+            .map((note, index) => this.normalizeJsonNote(note, lanes, zeroIndexed, index))
+            .filter(note => note !== null)
+            .sort((a, b) => a.time - b.time);
+
+        if (normalizedNotes.length === 0) {
+            throw new Error('JSON chart did not produce any playable notes');
+        }
+
+        const holdCount = normalizedNotes.filter(n => n.type === 'hold').length;
+
+        const baseMetadata = {
+            ...(chartJson.metadata || {}),
+            ...(chartSource.metadata || {})
+        };
+
+        const metadata = {
+            ...baseMetadata,
+            title: chartJson.title || chartSource.title || baseMetadata.title,
+            artist: chartJson.artist || chartSource.artist || baseMetadata.artist,
+            totalNotes: normalizedNotes.length,
+            holdNotes: holdCount,
+            source: 'json',
+            trackId: trackId,
+            loadedAt: Date.now()
+        };
+
+        if (!metadata.duration) {
+            metadata.duration = chartSource.duration || chartJson.duration || baseMetadata.duration;
+        }
+
+        if (difficultyKeys.length > 0) {
+            metadata.availableDifficulties = difficultyKeys;
+        }
+
+        return {
+            notes: normalizedNotes,
+            difficulty: selectedDifficulty || requestedDifficulty,
+            lanes: lanes,
+            metadata: metadata
+        };
+    }
+
+    /**
+     * Normalize a JSON note entry into runtime format
+     */
+    normalizeJsonNote(note, laneCount, zeroIndexed, index) {
+        if (!note) return null;
+
+        const rawTime = note.time ?? note.t ?? note.start ?? note.timestamp;
+        if (rawTime === undefined || rawTime === null) {
+            console.warn('Skipping JSON note without time index', index);
+            return null;
+        }
+
+        const time = Number(rawTime);
+        if (!Number.isFinite(time)) {
+            console.warn('Skipping JSON note with invalid time', rawTime);
+            return null;
+        }
+
+        const rawLane = note.lane ?? note.column ?? note.track ?? note.index ?? 0;
+        let lane = Number(rawLane);
+        if (!Number.isFinite(lane)) {
+            console.warn('Skipping JSON note with invalid lane', rawLane);
+            return null;
+        }
+
+        if (!zeroIndexed) {
+            lane -= 1;
+        }
+
+        if (lane < 0) lane = 0;
+        if (lane >= laneCount) {
+            lane = lane % laneCount;
+        }
+
+        const normalizedNote = {
+            time: time,
+            lane: lane,
+            type: 'tap'
+        };
+
+        const rawType = typeof note.type === 'string' ? note.type.toLowerCase() : null;
+        const duration = Number(note.duration ?? note.length ?? note.hold);
+        const endTime = Number(note.endTime ?? note.end ?? note.stop);
+
+        if (rawType === 'hold' || rawType === 'long' || (Number.isFinite(duration) && duration > 0) || Number.isFinite(endTime)) {
+            const computedDuration = Number.isFinite(duration)
+                ? duration
+                : (Number.isFinite(endTime) ? endTime - time : 0);
+
+            if (computedDuration >= config.CHART.HOLD_MIN_DURATION) {
+                normalizedNote.type = 'hold';
+                normalizedNote.duration = computedDuration;
+                normalizedNote.endTime = time + computedDuration;
+            }
+        }
+
+        if (note.velocity !== undefined) normalizedNote.velocity = note.velocity;
+        if (note.pitch !== undefined) normalizedNote.pitch = note.pitch;
+
+        return normalizedNote;
     }
 
     /**
@@ -789,13 +1029,16 @@ export class MidiChartGenerator {
      * Check if MIDI data exists for a track
      */
     hasMidiData(trackId) {
-        return this.trackMidiData.has(trackId);
+        return this.trackJsonCharts.has(trackId) || this.trackMidiData.has(trackId);
     }
 
     /**
      * Get list of available tracks
      */
     getAvailableTracks() {
-        return Array.from(this.trackMidiData.keys());
+        const midiTracks = Array.from(this.trackMidiData.keys());
+        const jsonTracks = Array.from(this.trackJsonCharts.keys());
+        const combined = new Set([...midiTracks, ...jsonTracks]);
+        return Array.from(combined);
     }
 }
