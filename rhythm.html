@@ -696,11 +696,14 @@
                     targetOffset = 15; // 15ms ahead to compensate for processing delay
                 } else {
                     // For other tracks, use audio analysis or default
-                    const track = await app.client.getCurrentPlaybackState();
-                    if (track && track.item) {
+                    const playbackState = await app.client.getPlaybackState();
+                    if (playbackState && playbackState.item) {
                         try {
-                            const features = await app.client.getAudioFeatures(track.item.id);
-                            const tempo = features.tempo || 120;
+                            const features = await app.client.getAudioFeatures(playbackState.item.id);
+                            const feature = Array.isArray(features?.audio_features)
+                                ? features.audio_features[0]
+                                : features;
+                            const tempo = feature?.tempo || 120;
                             
                             // Calculate offset based on tempo (slower songs need more lookahead)
                             if (tempo < 90) {
