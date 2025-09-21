@@ -1160,37 +1160,35 @@ app.playback.onTrackChange = async (track) => {
         }
 
 function generatePlaylistNames(country) {
-            const names = [
-                unction generatePlaylistNames(country) {
-            const names = [
-                'my mix', 'current rotation', 'on repeat', 'lately', 'vibes',
-                'summer nights', 'drive music', 'good stuff', 'favorites', 'new finds',
-                'mood', 'chill mix', 'bangers', 'late night', 'feel good',
-                'weekend', 'daily driver', 'fresh', 'liked songs pt. 2', 'study vibes',
-                'workout', 'road trip', 'throwbacks', 'hits different', 'no skips',
-                'that playlist', 'main character energy', 'gym', 'car songs', 'rain day',
-                'golden hour', 'untitled', '✨ vibes ✨', 'idc what anyone says', 'songs i fw',
-                'this month', 'lowkey fire', 'comfort songs', 'winter feels',
-                'midnight thoughts', 'shower songs', 'cooking playlist', 'gaming music',
-                'work from home', 'sunset drives', 'running mix', 'party mode',
-                'sleepy time', 'morning coffee', 'house cleaning', 'focus mode',
-                'rainy days', 'spring cleaning', 'roadtrip 2024', 'guilty pleasures',
-                'throwback thursday', 'sunday morning', 'study session', 'pre-game',
-                'after hours', 'background music', 'nostalgic feels', 'energy boost',
-                'chill sunday', 'late night drives', 'good energy only', 'motivation',
-                'car karaoke', 'walk the dog', 'cleaning house', 'cooking dinner',
-                'getting ready', 'wind down', 'productivity', 'happy songs',
-                'sad girl hours', 'confidence boost', 'beach day', 'autumn vibes',
-                'cozy evening', 'dance party', 'sing along', 'discover weekly pt 2'
-            ];
-            
-            const selectedName = names[Math.floor(Math.random() * names.length)];
-            
-            return {
-                public: selectedName,
-                private: selectedName
-            };
-        }
+    const names = [
+        'my mix', 'current rotation', 'on repeat', 'lately', 'vibes',
+        'summer nights', 'drive music', 'good stuff', 'favorites', 'new finds',
+        'mood', 'chill mix', 'bangers', 'late night', 'feel good',
+        'weekend', 'daily driver', 'fresh', 'liked songs pt. 2', 'study vibes',
+        'workout', 'road trip', 'throwbacks', 'hits different', 'no skips',
+        'that playlist', 'main character energy', 'gym', 'car songs', 'rain day',
+        'golden hour', 'untitled', '✨ vibes ✨', 'idc what anyone says', 'songs i fw',
+        'this month', 'lowkey fire', 'comfort songs', 'winter feels',
+        'midnight thoughts', 'shower songs', 'cooking playlist', 'gaming music',
+        'work from home', 'sunset drives', 'running mix', 'party mode',
+        'sleepy time', 'morning coffee', 'house cleaning', 'focus mode',
+        'rainy days', 'spring cleaning', 'roadtrip 2024', 'guilty pleasures',
+        'throwback thursday', 'sunday morning', 'study session', 'pre-game',
+        'after hours', 'background music', 'nostalgic feels', 'energy boost',
+        'chill sunday', 'late night drives', 'good energy only', 'motivation',
+        'car karaoke', 'walk the dog', 'cleaning house', 'cooking dinner',
+        'getting ready', 'wind down', 'productivity', 'happy songs',
+        'sad girl hours', 'confidence boost', 'beach day', 'autumn vibes',
+        'cozy evening', 'dance party', 'sing along', 'discover weekly pt 2'
+    ];
+    
+    const selectedName = names[Math.floor(Math.random() * names.length)];
+    
+    return {
+        public: selectedName,
+        private: selectedName
+    };
+}
 
         async function createPlaylist(userId, name, isPublic) {
             return await app.client.createPlaylist(userId, {
