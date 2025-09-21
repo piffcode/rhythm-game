@@ -27,7 +27,7 @@ export const config = {
     // Locked tracks for consistent gameplay
     LOCKED_TRACK_IDS: [
         '5FMyXeZ0reYloRTiCkPprT',  // Track 1 - Fixed
-        '0YWmeJtd7Fp1tH3978qUIH'   // Track 2 - Fixed
+        '6AriBfTagIjKVUov3WEwOa'   // Track 2 - Fixed
     ],
     
     // Pool of tracks for random third selection
@@ -41,15 +41,7 @@ export const config = {
     // Required Spotify scopes (exact string as specified)
     SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
     
-    // Natural Listening Behavior Configuration
-    NATURAL_LISTENING: {
-        SKIP_THRESHOLD_MIN: 35,     // Minimum % of track to play before skip
-        SKIP_THRESHOLD_MAX: 85,     // Maximum % of track to play before skip
-        SAVE_PROMPT_TRACK: 2,       // Which track number to show save prompt on (1-based)
-        SAVE_PROMPT_PROBABILITY: 0.7, // 70% chance to show save prompt
-        SAVE_PROMPT_DELAY_MIN: 2000,  // Min delay after track starts (ms)
-        SAVE_PROMPT_DELAY_MAX: 8000   // Max delay after track starts (ms)
-    },
+    // ... rest of your config remains the same
     
     // Gameplay Constants
     DIFFICULTY_SETTINGS: {
@@ -239,7 +231,15 @@ export const config = {
         }
     },
     
-    // Error Messages
+    // Natural Listening Behavior
+    NATURAL_LISTENING: {
+        SKIP_THRESHOLD_MIN: 88, // Skip after 88% of song
+        SKIP_THRESHOLD_MAX: 100, // Skip before 100% of song
+        SAVE_PROMPT_PROBABILITY: 0.7, // 70% chance to show save prompt
+        SAVE_PROMPT_DELAY_MIN: 1000, // 1 second minimum delay
+        SAVE_PROMPT_DELAY_MAX: 5000, // 5 seconds maximum delay
+        SAVE_PROMPT_TRACK: 2 // Show save prompt after track 2 (0-indexed = track index 1)
+    },
     ERRORS: {
         NO_PREMIUM: 'Spotify Premium required to play.',
         NO_DEVICE: 'No active device found. Open Spotify, start any song, return here, then press Start.',
