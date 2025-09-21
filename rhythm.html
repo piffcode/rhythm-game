@@ -903,46 +903,55 @@
 
             // Native playback event handlers
 app.playback.onTrackChange = async (track) => {
-                try {
-                    console.log(`Track changed: ${track.name}`);
-                    
-                    // Check if MIDI data exists for this track - MANDATORY
-                    if (!app.engine.midiGenerator.hasMidiData(track.id)) {
-                        const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
-                        console.error(error);
-                        showError(error);
-                        return;
-                    }
+    try {
+        console.log(`Track changed: ${track.name}`);
+        
+        // Check if MIDI data exists for this track - MANDATORY
+        if (!app.engine.midiGenerator.hasMidiData(track.id)) {
+            const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
+            console.error(error);
+            showError(error);
+            return;
+        }
 
-                    // Initialize natural listening behavior for this track
-                    const trackDuration = track.duration_ms || 180000;
-                    const currentTrackIndex = app.engine.currentTrackIndex || 0;
-                    initializeNaturalListening(currentTrackIndex, trackDuration);
+        // NEW: Get accurate track duration from Spotify API
+        let trackDuration = track.duration_ms || 180000; // Default fallback
+        try {
+            const fullTrack = await app.client.getTrack(track.id);
+            trackDuration = fullTrack.duration_ms || trackDuration;
+            console.log(`Track duration from Spotify: ${trackDuration}ms (${(trackDuration/1000).toFixed(1)}s)`);
+        } catch (durationError) {
+            console.warn('Could not get track duration from Spotify API, using fallback:', trackDuration);
+        }
 
-                    // Auto-calibrate for this track
-                    await autoCalibrate();
+        // Initialize natural listening behavior with accurate duration
+        const currentTrackIndex = app.engine.currentTrackIndex || 0;
+        initializeNaturalListening(currentTrackIndex, trackDuration);
 
-                    // Reset and start timing clock for new track
-                    app.timingClock.reset();
-                    app.timingClock.start();
+        // Auto-calibrate for this track
+        await autoCalibrate();
 
-                    // ONLY try MIDI - no fallbacks allowed
-                    try {
-                        await app.engine.startTrack(track, null);
-                        console.log('Track started successfully with MIDI chart');
-                    } catch (error) {
-                        const errorMsg = `Failed to start MIDI track: ${track.name}. ${error.message}`;
-                        console.error(errorMsg);
-                        showError(errorMsg);
-                        return;
-                    }
+        // Reset and start timing clock for new track
+        app.timingClock.reset();
+        app.timingClock.start();
 
-                } catch (error) {
-                    const errorMsg = `Critical error loading track: ${track.name}. ${error.message}`;
-                    console.error(errorMsg);
-                    showError(errorMsg);
-                }
-            };
+        // ONLY try MIDI - no fallbacks allowed
+        try {
+            await app.engine.startTrack(track, null);
+            console.log('Track started successfully with MIDI chart');
+        } catch (error) {
+            const errorMsg = `Failed to start MIDI track: ${track.name}. ${error.message}`;
+            console.error(errorMsg);
+            showError(errorMsg);
+            return;
+        }
+
+    } catch (error) {
+        const errorMsg = `Critical error loading track: ${track.name}. ${error.message}`;
+        console.error(errorMsg);
+        showError(errorMsg);
+    }
+};
 
             app.playback.onStateChange = (state) => {
                 // Sync timing clock with playback state
