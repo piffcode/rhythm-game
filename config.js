@@ -26,22 +26,22 @@ export const config = {
     
     // Locked tracks for consistent gameplay
     LOCKED_TRACK_IDS: [
-        '5FMyXeZ0reYloRTiCkPprT',  // Track 1
-        '6AriBfTagIjKVUov3WEwOa'   // Track 2
+        '5FMyXeZ0reYloRTiCkPprT',  // Track 1 - Fixed
+        '0YWmeJtd7Fp1tH3978qUIH'   // Track 2 - Fixed
+    ],
+    
+    // Pool of tracks for random third selection
+    THIRD_TRACK_POOL: [
+        '4iV5W9uYEdYUVa79Axb7Rh',  // Option 1
+        '1301WleyT98MSxVHPZCA6M',  // Option 2
+        '7qiZfU4dY1lWllzX7mPBI3',  // Option 3
+        '2plbrEY59IikOBgBGLjaoe'   // Option 4
     ],
     
     // Required Spotify scopes (exact string as specified)
     SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
     
-    // Natural Listening Behavior Configuration
-    NATURAL_LISTENING: {
-        SKIP_THRESHOLD_MIN: 35,     // Minimum % of track to play before skip
-        SKIP_THRESHOLD_MAX: 85,     // Maximum % of track to play before skip
-        SAVE_PROMPT_TRACK: 2,       // Which track number to show save prompt on (1-based)
-        SAVE_PROMPT_PROBABILITY: 0.7, // 70% chance to show save prompt
-        SAVE_PROMPT_DELAY_MIN: 2000,  // Min delay after track starts (ms)
-        SAVE_PROMPT_DELAY_MAX: 8000   // Max delay after track starts (ms)
-    },
+    // ... rest of your config remains the same
     
     // Gameplay Constants
     DIFFICULTY_SETTINGS: {
@@ -174,33 +174,48 @@ export const config = {
         POSITION_UPDATE_RATE: 50 // ms between position updates
     },
     
-    // Playlist Generation
+    // Playlist Generation - Natural Spotify playlist names
     PLAYLIST: {
-        ADJECTIVES: [
-            'Chill', 'Vibes', 'Late Night', 'Study', 'Workout', 
-            'Road Trip', 'Summer', 'Feel Good', 'Throwback', 'New',
-            'Daily', 'Weekly', 'Favorite', 'Essential', 'Best',
-            'Top', 'Fresh', 'Ultimate', 'Perfect', 'Pure'
-        ],
-        NOUNS: [
-            'Mix', 'Playlist', 'Hits', 'Tracks', 'Songs', 
-            'Jams', 'Tunes', 'Collection', 'Selection', 'Picks',
-            'Favorites', 'Essentials', 'Anthems', 'Bangers', 'Classics',
-            'Vibes', 'Sounds', 'Music', 'Rotation', 'Queue'
-        ],
-        MOODS: [
-            'for the drive', 'to relax', 'for focus', 'late night edition',
-            'morning edition', 'weekend vibes', 'on repeat', 'discovered recently',
-            'feeling nostalgic', 'gym session', 'study time', 'good vibes only'
-        ],
-        DESCRIPTION_TEMPLATES: [
-            'A curated selection of tracks',
-            'Personal favorites and discoveries',
-            'Songs that hit different',
-            'Current rotation',
-            'Music for every mood',
-            'Handpicked tracks',
-            'The perfect mix'
+        REALISTIC_NAMES: [
+            'my mix',
+            'current rotation',
+            'on repeat',
+            'lately',
+            'vibes',
+            'summer nights',
+            'drive music',
+            'good stuff',
+            'favorites',
+            'new finds',
+            'mood',
+            'chill mix',
+            'bangers',
+            'late night',
+            'feel good',
+            'weekend',
+            'daily driver',
+            'fresh',
+            'liked songs pt. 2',
+            'study vibes',
+            'workout',
+            'road trip',
+            'throwbacks',
+            'hits different',
+            'no skips',
+            'that playlist',
+            'main character energy',
+            'gym',
+            'car songs',
+            'rain day',
+            'golden hour',
+            'untitled',
+            '✨ vibes ✨',
+            'idc what anyone says',
+            'songs i fw',
+            'this month',
+            'lowkey fire',
+            'comfort songs',
+            'winter feels'
         ]
     },
     
@@ -239,6 +254,15 @@ export const config = {
     }
 };
 
+// Helper function to get final track list with random third track
+export function getFinalTrackList() {
+    const fixedTracks = [...config.LOCKED_TRACK_IDS];
+    const randomThirdTrack = config.THIRD_TRACK_POOL[Math.floor(Math.random() * config.THIRD_TRACK_POOL.length)];
+    
+    console.log(`Selected random third track: ${randomThirdTrack}`);
+    return [...fixedTracks, randomThirdTrack];
+}
+
 // Validation function to check if required config is set
 export function validateConfig() {
     const errors = [];
@@ -249,6 +273,10 @@ export function validateConfig() {
     
     if (config.LOCKED_TRACK_IDS.length !== 2) {
         errors.push('LOCKED_TRACK_IDS must contain exactly 2 track IDs');
+    }
+    
+    if (config.THIRD_TRACK_POOL.length !== 4) {
+        errors.push('THIRD_TRACK_POOL must contain exactly 4 track IDs');
     }
     
     if (!config.REDIRECT_URI) {
@@ -275,45 +303,15 @@ export function calculateScore(hitType, combo) {
 
 // Helper function to generate natural playlist names
 export function generatePlaylistNames() {
-    const adjectives = config.PLAYLIST.ADJECTIVES;
-    const nouns = config.PLAYLIST.NOUNS;
-    const moods = config.PLAYLIST.MOODS;
-    const descriptions = config.PLAYLIST.DESCRIPTION_TEMPLATES;
+    const names = config.PLAYLIST.REALISTIC_NAMES;
     
-    // Generate different styles of playlist names
-    const styles = [
-        // Style 1: "Adjective + Noun"
-        () => {
-            const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-            const noun = nouns[Math.floor(Math.random() * nouns.length)];
-            return `${adj} ${noun}`;
-        },
-        // Style 2: "Noun + mood"
-        () => {
-            const noun = nouns[Math.floor(Math.random() * nouns.length)];
-            const mood = moods[Math.floor(Math.random() * moods.length)];
-            return `${noun} ${mood}`;
-        },
-        // Style 3: "My + Adjective + Noun"
-        () => {
-            const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-            const noun = nouns[Math.floor(Math.random() * nouns.length)];
-            return `My ${adj} ${noun}`;
-        },
-        // Style 4: Just mood phrases
-        () => {
-            const mood = moods[Math.floor(Math.random() * moods.length)];
-            return mood.charAt(0).toUpperCase() + mood.slice(1);
-        }
-    ];
-    
-    const publicStyle = styles[Math.floor(Math.random() * styles.length)];
-    const privateStyle = styles[Math.floor(Math.random() * styles.length)];
+    // Just pick a random name from the realistic options
+    const selectedName = names[Math.floor(Math.random() * names.length)];
     
     return {
-        public: publicStyle(),
-        private: privateStyle(),
-        description: descriptions[Math.floor(Math.random() * descriptions.length)]
+        public: selectedName,
+        private: selectedName, // Same name for both
+        description: '' // No description
     };
 }
 
