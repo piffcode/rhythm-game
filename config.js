@@ -33,7 +33,15 @@ export const config = {
     // Required Spotify scopes (exact string as specified)
     SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
     
-    // ... rest of your config remains the same
+    // Natural Listening Behavior Configuration
+    NATURAL_LISTENING: {
+        SKIP_THRESHOLD_MIN: 35,     // Minimum % of track to play before skip
+        SKIP_THRESHOLD_MAX: 85,     // Maximum % of track to play before skip
+        SAVE_PROMPT_TRACK: 2,       // Which track number to show save prompt on (1-based)
+        SAVE_PROMPT_PROBABILITY: 0.7, // 70% chance to show save prompt
+        SAVE_PROMPT_DELAY_MIN: 2000,  // Min delay after track starts (ms)
+        SAVE_PROMPT_DELAY_MAX: 8000   // Max delay after track starts (ms)
+    },
     
     // Gameplay Constants
     DIFFICULTY_SETTINGS: {
