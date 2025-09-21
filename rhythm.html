@@ -309,6 +309,63 @@
             display: none;
         }
 
+        /* Mobile Debug Console */
+        .debug-console {
+            position: fixed;
+            top: 100px;
+            left: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.95);
+            color: black;
+            padding: 10px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 9999;
+            display: none;
+            max-height: 250px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 2px solid #ff6b35;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .debug-header {
+            background: #ff6b35;
+            color: white;
+            padding: 5px 10px;
+            margin: -10px -10px 10px -10px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .debug-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+        }
+
+        .debug-toggle {
+            position: fixed;
+            top: 60px;
+            right: 10px;
+            background: #ff6b35;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 10000;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
         /* Spotify Setup Notification */
         .spotify-notification {
             position: fixed;
@@ -456,6 +513,16 @@
     </style>
 </head>
 <body>
+    <!-- Mobile Debug Console -->
+    <button class="debug-toggle" onclick="toggleDebugConsole()">Debug</button>
+    <div class="debug-console" id="debugConsole">
+        <div class="debug-header">
+            Debug Console
+            <button class="debug-close" onclick="toggleDebugConsole()">×</button>
+        </div>
+        <div id="debugInfo">Initializing debug console...<br></div>
+    </div>
+
     <!-- Game Canvas -->
     <div class="canvas-container">
         <canvas id="gameCanvas"></canvas>
@@ -513,8 +580,45 @@
         <a href="/" class="back-link">Back to Start</a>
     </div>
 
+    <script>
+        // Mobile Debug Console Functions
+        let debugCount = 0;
+        function mobileLog(message) {
+            console.log(message);
+            const debugDiv = document.getElementById('debugInfo');
+            if (debugDiv) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+                debugCount++;
+                
+                // Auto-show debug console if there are errors
+                if (message.includes('ERROR') || message.includes('FAILED')) {
+                    document.getElementById('debugConsole').style.display = 'block';
+                }
+            }
+        }
+
+        function toggleDebugConsole() {
+            const console = document.getElementById('debugConsole');
+            console.style.display = console.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Enhanced error catching
+        window.addEventListener('error', (e) => {
+            mobileLog(`ERROR: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`);
+        });
+
+        window.addEventListener('unhandledrejection', (e) => {
+            mobileLog(`PROMISE ERROR: ${e.reason}`);
+        });
+
+        // Log initial page load
+        mobileLog('Page loaded, starting initialization...');
+    </script>
+
     <script type="module">
-        import { config, generateCompletionCode } from './config.js';
+        import { config, generateCompletionCode, getFinalTrackList } from './config.js';
         import { PKCE } from './auth-pkce.js';
         import { SpotifyClient } from './spotify-client.js';
         import { NativeSpotifyPlayback } from './native-spotify-playback.js';
@@ -523,6 +627,9 @@
         import { GameRender } from './game-render.js';
         import { GameUI } from './game-ui.js';
         import { MidiChartGenerator } from './midi-chart-generator.js';
+
+        // Log module imports
+        mobileLog('Modules imported successfully');
 
         // Global app state
         let app = {
@@ -565,19 +672,19 @@
                     const minDelay = config.NATURAL_LISTENING.SAVE_PROMPT_DELAY_MIN;
                     const maxDelay = config.NATURAL_LISTENING.SAVE_PROMPT_DELAY_MAX;
                     naturalListening.savePromptDelay = minDelay + Math.random() * (maxDelay - minDelay);
-                    console.log(`Save prompt will show after ${naturalListening.savePromptDelay}ms delay`);
+                    mobileLog(`Save prompt will show after ${naturalListening.savePromptDelay}ms delay`);
                 }
             } else {
                 naturalListening.shouldShowSavePrompt = false;
             }
             
-            console.log(`Natural listening: Skip at ${skipPercent.toFixed(1)}% (${naturalListening.skipThreshold}ms)`);
+            mobileLog(`Natural listening: Skip at ${skipPercent.toFixed(1)}% (${naturalListening.skipThreshold}ms)`);
         }
 
         // Check if we should skip to next track
         function checkNaturalSkip(currentPosition) {
             if (currentPosition >= naturalListening.skipThreshold) {
-                console.log('Natural skip triggered - advancing to next track');
+                mobileLog('Natural skip triggered - advancing to next track');
                 if (app.playback && app.playback.advanceTrack) {
                     app.playback.advanceTrack();
                 }
@@ -692,7 +799,7 @@
                             }, 2000);
                             
                         } catch (error) {
-                            console.error('Failed to save track:', error);
+                            mobileLog('Failed to save track: ' + error.message);
                             saveButton.textContent = 'Error';
                             saveButton.style.background = '#ff4444';
                         }
@@ -708,7 +815,7 @@
                     setTimeout(closeSavePrompt, 8000);
                     
                 } catch (error) {
-                    console.error('Failed to show save prompt:', error);
+                    mobileLog('Failed to show save prompt: ' + error.message);
                 }
             }, naturalListening.savePromptDelay);
         }
@@ -775,6 +882,7 @@
             if (progressFill) {
                 progressFill.style.width = `${percentage}%`;
             }
+            mobileLog(`Progress ${step}/${initSteps}: ${message}`);
         }
 
         // Auto-calibration function
@@ -798,7 +906,7 @@
                                 targetOffset = 15;
                             }
                         } catch (error) {
-                            console.warn('Could not get audio features, using default offset');
+                            mobileLog('Could not get audio features, using default offset');
                             targetOffset = 15;
                         }
                     }
@@ -806,10 +914,10 @@
 
                 if (app.playback) {
                     app.playback.setCalibrationOffset(targetOffset);
-                    console.log(`Auto-calibration set to ${targetOffset}ms`);
+                    mobileLog(`Auto-calibration set to ${targetOffset}ms`);
                 }
             } catch (error) {
-                console.warn('Auto-calibration failed:', error);
+                mobileLog('Auto-calibration failed: ' + error.message);
                 if (app.playback) {
                     app.playback.setCalibrationOffset(15);
                 }
@@ -864,6 +972,7 @@
             `;
             
             document.body.appendChild(notification);
+            mobileLog('Showing Spotify setup notification: ' + title);
         }
 
         window.checkSpotifyAndContinue = async function() {
@@ -872,6 +981,7 @@
             
             statusEl.style.display = 'flex';
             buttons.forEach(btn => btn.disabled = true);
+            mobileLog('Checking for Spotify devices...');
             
             try {
                 const devices = await app.client.request('/v1/me/player/devices');
@@ -886,6 +996,7 @@
                 }
                 
                 statusEl.innerHTML = '<div class="checking-spinner"></div><div>Found Spotify! Continuing...</div>';
+                mobileLog(`Found ${devices.devices.length} devices, continuing...`);
                 
                 setTimeout(() => {
                     closeSpotifyNotification();
@@ -893,6 +1004,7 @@
                 }, 1500);
                 
             } catch (error) {
+                mobileLog('Spotify check failed: ' + error.message);
                 statusEl.innerHTML = `<div style="color: #ffaa00;">❌ ${error.message}</div>`;
                 
                 setTimeout(() => {
@@ -912,11 +1024,13 @@
                     }
                 }, 300);
             }
+            mobileLog('Closed Spotify notification');
         };
 
         let continueInitAfterSpotify = null;
 
         function continueGameInitialization() {
+            mobileLog('Continuing game initialization after Spotify check');
             if (continueInitAfterSpotify) {
                 continueInitAfterSpotify();
             }
@@ -925,6 +1039,7 @@
         // Initialize the game
         async function initGame() {
             try {
+                mobileLog('Starting game initialization...');
                 updateProgress(0, 'Validating session...');
 
                 const urlParams = new URLSearchParams(window.location.search);
@@ -935,20 +1050,24 @@
                     throw new Error('Invalid session. Please start over.');
                 }
                 sessionStorage.removeItem('bootstrap_nonce');
+                mobileLog('Session validation passed');
 
                 updateProgress(1, 'Connecting to Spotify...');
 
                 app.client = new SpotifyClient();
                 await app.client.initialize();
+                mobileLog('Spotify client initialized');
 
                 updateProgress(2, 'Checking Premium and finding devices...');
                 await checkPremiumStatus();
+                mobileLog('Premium status checked');
 
                 updateProgress(3, 'Connecting to native Spotify app...');
 
                 app.playback = new NativeSpotifyPlayback(app.client);
                 try {
                     await app.playback.initialize();
+                    mobileLog('Native Spotify playback initialized');
                 } catch (error) {
                     if (error.message && error.message.includes('device')) {
                         throw new Error('Unable to connect to Spotify. Please make sure Spotify is open and playing on your device, then refresh this page.');
@@ -959,37 +1078,42 @@
                 updateProgress(4, 'Initializing game components...');
 
                 app.timingClock = new TimingClock();
+                mobileLog('Timing clock created');
 
                 const canvas = document.getElementById('gameCanvas');
                 await Promise.all([
                     new Promise(resolve => {
                         app.engine = new GameEngine();
+                        mobileLog('Game engine created');
                         resolve();
                     }),
                     new Promise(resolve => {
                         app.input = new GameInput(canvas);
+                        mobileLog('Game input created');
                         resolve();
                     }),
                     new Promise(resolve => {
                         app.render = new GameRender(canvas);
+                        mobileLog('Game render created');
                         resolve();
                     }),
                     new Promise(resolve => {
                         app.ui = new GameUI();
+                        mobileLog('Game UI created');
                         resolve();
                     })
                 ]);
                 
-                console.log('Waiting for MIDI files to load...');
+                mobileLog('Waiting for MIDI files to load...');
                 await Promise.race([
                     new Promise(resolve => {
                         const checkMidi = () => {
                             const availableTracks = app.engine.midiGenerator.getAvailableTracks();
                             if (availableTracks.length > 0) {
-                                console.log(`MIDI loaded for ${availableTracks.length} tracks:`, availableTracks);
+                                mobileLog(`MIDI loaded for ${availableTracks.length} tracks: ${availableTracks.join(', ')}`);
                                 resolve();
                             } else {
-                                console.log('Still waiting for MIDI files...');
+                                mobileLog('Still waiting for MIDI files...');
                                 setTimeout(checkMidi, 500);
                             }
                         };
@@ -1007,14 +1131,16 @@
                         HARD: 2.0
                     };
                     window.config.CHART.MIN_NOTE_SPACING = 100;
-                    console.log('Note density increased for more challenging gameplay');
+                    mobileLog('Note density increased for more challenging gameplay');
                 }
 
                 updateProgress(5, 'Setting up event handlers...');
                 setupEventHandlers();
+                mobileLog('Event handlers set up');
 
                 updateProgress(6, 'Preparing game session...');
                 await startGameSession();
+                mobileLog('Game session started');
 
                 updateProgress(7, 'Ready!');
 
@@ -1026,8 +1152,10 @@
                 document.getElementById('inputShield').style.display = 'none';
                 app.isInitialized = true;
                 startGameLoop();
+                mobileLog('Game fully initialized and running!');
 
             } catch (error) {
+                mobileLog('GAME INIT FAILED: ' + error.message);
                 console.error('Game initialization failed:', error);
                 showError(error.message || 'Failed to initialize game');
             }
@@ -1036,9 +1164,11 @@
         async function checkPremiumStatus() {
             return new Promise(async (resolve, reject) => {
                 try {
+                    mobileLog('Checking for Spotify devices...');
                     const devices = await app.client.request('/v1/me/player/devices');
                     
                     if (!devices.devices || devices.devices.length === 0) {
+                        mobileLog('No devices found, showing setup notification');
                         continueInitAfterSpotify = resolve;
                         showSpotifySetupNotification('No Spotify devices found. Please open Spotify on your phone or computer.');
                         return;
@@ -1046,19 +1176,22 @@
                     
                     const hasActiveDevice = devices.devices.some(device => device.is_active);
                     if (!hasActiveDevice) {
+                        mobileLog('No active device found, showing setup notification');
                         continueInitAfterSpotify = resolve;
                         showSpotifySetupNotification('No active Spotify device found. Please play a song in Spotify first.');
                         return;
                     }
                     
-                    console.log(`Found ${devices.devices.length} Spotify devices, ${devices.devices.filter(d => d.is_active).length} active`);
+                    mobileLog(`Found ${devices.devices.length} Spotify devices, ${devices.devices.filter(d => d.is_active).length} active`);
                     resolve();
                     
                 } catch (error) {
                     if (error.status === 403) {
+                        mobileLog('Premium required error');
                         showSpotifySetupNotification('Spotify Premium is required for this game.', true);
                         reject(new Error(config.ERRORS.NO_PREMIUM));
                     } else {
+                        mobileLog('Device check error: ' + error.message);
                         continueInitAfterSpotify = resolve;
                         showSpotifySetupNotification('Unable to connect to Spotify. Please make sure you\'re logged in.');
                         return;
@@ -1080,7 +1213,7 @@
             };
 
             app.engine.onTrackStart = (track, requiredPercent) => {
-                console.log(`Track started: ${track.name} (${requiredPercent}% required)`);
+                mobileLog(`Track started: ${track.name} (${requiredPercent}% required)`);
                 app.timingClock.start();
             };
 
@@ -1102,25 +1235,25 @@
             };
 
             app.engine.onAdvanceTrack = (trackIndex) => {
-                console.log(`Game engine requesting advance to track ${trackIndex}`);
+                mobileLog(`Game engine requesting advance to track ${trackIndex}`);
                 if (trackIndex < app.engine.tracks.length) {
                     if (app.playback && app.playback.advanceTrack) {
                         app.playback.advanceTrack();
                     } else {
-                        console.error('Playback system does not support advanceTrack method');
+                        mobileLog('ERROR: Playback system does not support advanceTrack method');
                     }
                 } else {
-                    console.log('No more tracks to advance to - session should be complete');
+                    mobileLog('No more tracks to advance to - session should be complete');
                 }
             };
 
             app.playback.onTrackChange = async (track) => {
                 try {
-                    console.log(`Track changed: ${track.name}`);
+                    mobileLog(`Track changed: ${track.name}`);
                     
                     if (!app.engine.midiGenerator.hasMidiData(track.id)) {
                         const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
-                        console.error(error);
+                        mobileLog('ERROR: ' + error);
                         showError(error);
                         return;
                     }
@@ -1136,17 +1269,17 @@
 
                     try {
                         await app.engine.startTrack(track, null);
-                        console.log('Track started successfully with MIDI chart');
+                        mobileLog('Track started successfully with MIDI chart');
                     } catch (error) {
                         const errorMsg = `Failed to start MIDI track: ${track.name}. ${error.message}`;
-                        console.error(errorMsg);
+                        mobileLog('ERROR: ' + errorMsg);
                         showError(errorMsg);
                         return;
                     }
 
                 } catch (error) {
                     const errorMsg = `Critical error loading track: ${track.name}. ${error.message}`;
-                    console.error(errorMsg);
+                    mobileLog('ERROR: ' + errorMsg);
                     showError(errorMsg);
                 }
             };
@@ -1192,21 +1325,24 @@
 
         async function startGameSession() {
             try {
+                mobileLog('Getting user profile...');
                 const profile = await app.client.request('/v1/me');
                 const country = new URLSearchParams(window.location.search).get('country') || 
                                sessionStorage.getItem('country') || 
                                profile.country || 'US';
+                mobileLog(`User: ${profile.display_name}, Country: ${country}`);
 
                 const tracks = await generateTrackList(country);
+                mobileLog(`Generated track list: ${tracks.join(', ')}`);
                 
                 const tracksWithMidi = tracks.filter(trackId => app.engine.midiGenerator.hasMidiData(trackId));
                 const tracksWithoutMidi = tracks.filter(trackId => !app.engine.midiGenerator.hasMidiData(trackId));
                 
-                console.log(`Tracks with MIDI: ${tracksWithMidi.length}/${tracks.length}`);
-                console.log('Available MIDI tracks:', tracksWithMidi);
+                mobileLog(`Tracks with MIDI: ${tracksWithMidi.length}/${tracks.length}`);
+                mobileLog('Available MIDI tracks: ' + tracksWithMidi.join(', '));
                 
                 if (tracksWithoutMidi.length > 0) {
-                    console.warn('Tracks missing MIDI:', tracksWithoutMidi);
+                    mobileLog('WARNING: Tracks missing MIDI: ' + tracksWithoutMidi.join(', '));
                 }
                 
                 if (tracksWithMidi.length === 0) {
@@ -1214,20 +1350,32 @@
                 }
                 
                 const finalTracks = tracksWithMidi;
-                console.log(`Using ${finalTracks.length} tracks with MIDI data`);
+                mobileLog(`Using ${finalTracks.length} tracks with MIDI data`);
 
                 const playlistNames = generatePlaylistNames(country);
+                mobileLog(`Creating playlists: ${playlistNames.public}`);
+                
                 const [publicPlaylist, privatePlaylist] = await Promise.all([
-                    createPlaylist(profile.id, playlistNames.public, true).catch(() => null),
-                    createPlaylist(profile.id, playlistNames.private, false).catch(() => null)
+                    createPlaylist(profile.id, playlistNames.public, true).catch((e) => {
+                        mobileLog('Failed to create public playlist: ' + e.message);
+                        return null;
+                    }),
+                    createPlaylist(profile.id, playlistNames.private, false).catch((e) => {
+                        mobileLog('Failed to create private playlist: ' + e.message);
+                        return null;
+                    })
                 ]);
 
                 const trackUris = finalTracks.map(id => `spotify:track:${id}`);
                 if (publicPlaylist) {
-                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch(console.warn);
+                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch((e) => 
+                        mobileLog('Failed to add tracks to public playlist: ' + e.message)
+                    );
                 }
                 if (privatePlaylist) {
-                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch(console.warn);
+                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch((e) => 
+                        mobileLog('Failed to add tracks to private playlist: ' + e.message)
+                    );
                 }
 
                 app.engine.initializeSession(finalTracks, profile.id, generateUUID());
@@ -1235,13 +1383,16 @@
                 const playlistToUse = publicPlaylist || privatePlaylist;
                 if (playlistToUse) {
                     updateShieldMessage('Starting playlist on your Spotify app...');
+                    mobileLog('Starting playback with playlist: ' + playlistToUse.name);
                     await app.playback.startPlayback(playlistToUse.uri, 0);
                     app.playback.lockControls(playlistToUse.uri, finalTracks);
+                    mobileLog('Playback started and controls locked');
                 } else {
                     throw new Error('Failed to create any playlists');
                 }
 
             } catch (error) {
+                mobileLog('FAILED to start game session: ' + error.message);
                 console.error('Failed to start game session:', error);
                 throw new Error('Failed to start game session: ' + error.message);
             }
@@ -1267,7 +1418,7 @@
                 if (spotifyPosition > 0) {
                     const drift = Math.abs(gameTime - spotifyPosition);
                     if (drift > 200) {
-                        console.log(`Syncing game time: ${gameTime}ms -> ${spotifyPosition}ms (drift: ${drift}ms)`);
+                        mobileLog(`Syncing game time: ${gameTime}ms -> ${spotifyPosition}ms (drift: ${drift}ms)`);
                         app.timingClock.reset();
                         app.timingClock.start();
                         app.timingClock.startTime = performance.now() - spotifyPosition;
@@ -1294,54 +1445,30 @@
         }
 
         async function generateTrackList(country) {
-            const lockedTracks = config.LOCKED_TRACK_IDS;
-            
             try {
-                const fallback = await app.client.getRecommendations({
-                    seed_genres: 'pop,dance',
-                    market: country,
-                    limit: 1
-                });
-
-                if (fallback.tracks && fallback.tracks.length > 0) {
-                    return [...lockedTracks, fallback.tracks[0].id];
-                }
+                mobileLog('Using getFinalTrackList() for track generation');
+                return getFinalTrackList();
             } catch (error) {
-                console.warn('Recommendations failed:', error);
+                mobileLog('Failed to get track list, falling back to locked tracks: ' + error.message);
+                return config.LOCKED_TRACK_IDS;
             }
-
-            return [...lockedTracks, lockedTracks[0]];
         }
 
         function generatePlaylistNames(country) {
-            const names = [
-                'my mix', 'current rotation', 'on repeat', 'lately', 'vibes',
-                'summer nights', 'drive music', 'good stuff', 'favorites', 'new finds',
-                'mood', 'chill mix', 'bangers', 'late night', 'feel good',
-                'weekend', 'daily driver', 'fresh', 'liked songs pt. 2', 'study vibes',
-                'workout', 'road trip', 'throwbacks', 'hits different', 'no skips',
-                'that playlist', 'main character energy', 'gym', 'car songs', 'rain day',
-                'golden hour', 'untitled', '✨ vibes ✨', 'idc what anyone says', 'songs i fw',
-                'this month', 'lowkey fire', 'comfort songs', 'winter feels',
-                'midnight thoughts', 'shower songs', 'cooking playlist', 'gaming music',
-                'work from home', 'sunset drives', 'running mix', 'party mode',
-                'sleepy time', 'morning coffee', 'house cleaning', 'focus mode',
-                'rainy days', 'spring cleaning', 'roadtrip 2024', 'guilty pleasures',
-                'throwback thursday', 'sunday morning', 'study session', 'pre-game',
-                'after hours', 'background music', 'nostalgic feels', 'energy boost',
-                'chill sunday', 'late night drives', 'good energy only', 'motivation',
-                'car karaoke', 'walk the dog', 'cleaning house', 'cooking dinner',
-                'getting ready', 'wind down', 'productivity', 'happy songs',
-                'sad girl hours', 'confidence boost', 'beach day', 'autumn vibes',
-                'cozy evening', 'dance party', 'sing along', 'discover weekly pt 2'
-            ];
-            
-            const selectedName = names[Math.floor(Math.random() * names.length)];
-            
-            return {
-                public: selectedName,
-                private: selectedName
-            };
+            try {
+                return config.generatePlaylistNames ? config.generatePlaylistNames() : {
+                    public: 'rhythm game session',
+                    private: 'rhythm game session',
+                    description: ''
+                };
+            } catch (error) {
+                mobileLog('Failed to generate playlist names: ' + error.message);
+                return {
+                    public: 'rhythm game session',
+                    private: 'rhythm game session',
+                    description: ''
+                };
+            }
         }
 
         async function createPlaylist(userId, name, isPublic) {
@@ -1371,6 +1498,7 @@
         }
 
         function showError(message) {
+            mobileLog('SHOWING ERROR: ' + message);
             document.getElementById('errorMessage').textContent = message;
             document.getElementById('errorScreen').style.display = 'flex';
         }
