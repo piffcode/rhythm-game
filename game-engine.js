@@ -62,11 +62,11 @@ export class GameEngine {
         this.lastFpsTime = 0;
         this.currentFps = 60;
         this.averageFrameTime = 16.67;
-        
+
         // Timing accuracy tracking
         this.timingAccuracy = [];
         this.maxTimingHistory = 100;
-        
+
         // Event callbacks
         this.onTrackStart = null;
         this.onTrackEnd = null;
@@ -74,6 +74,9 @@ export class GameEngine {
         this.onScoreUpdate = null;
         this.onHealthUpdate = null;
         this.onTimingUpdate = null;
+
+        // Optional debugger hook
+        this.debugger = null;
     }
 
     /**
@@ -95,6 +98,11 @@ export class GameEngine {
         
         this.isInitialized = true;
         console.log('Game session initialized with', tracks.length, 'tracks');
+        this.debugger?.log('session:initialize', {
+            trackCount: tracks.length,
+            sessionId: sessionId,
+            userId: userId
+        });
     }
 
     /**
@@ -134,7 +142,15 @@ export class GameEngine {
         this.isPlaying = true;
         
         console.log(`Started track: ${trackData.name} (${this.requiredPercent}% required, ${this.currentChart.notes.length} notes)`);
-        
+
+        this.debugger?.log('track:start', {
+            trackId: trackData.id,
+            trackName: trackData.name,
+            requiredPercent: this.requiredPercent,
+            chartSource: this.currentChart?.metadata?.source || 'unknown',
+            noteCount: this.currentChart?.notes?.length || 0
+        });
+
         if (this.onTrackStart) {
             this.onTrackStart(trackData, this.requiredPercent);
         }
@@ -153,6 +169,10 @@ export class GameEngine {
         
         // Clear timing accuracy history
         this.timingAccuracy = [];
+        this.debugger?.log('track:stateReset', {
+            trackId: this.currentTrack?.id,
+            difficulty: this.difficulty
+        });
     }
 
     /**
@@ -173,6 +193,10 @@ export class GameEngine {
             if (drift > 100) { // More than 100ms drift
                 console.log(`Audio drift detected: ${drift.toFixed(0)}ms, resyncing...`);
                 this.audioStartTime = now - audioPositionMs;
+                this.debugger?.log('timing:driftDetected', {
+                    drift: Math.round(drift),
+                    audioPosition: Math.round(audioPositionMs)
+                });
             }
             
             this.lastPositionSync = now;
@@ -197,6 +221,7 @@ export class GameEngine {
     setTimingOffset(offsetMs) {
         this.timingOffset = offsetMs;
         console.log(`Timing offset set to ${offsetMs}ms`);
+        this.debugger?.log('timing:offsetSet', { offset: offsetMs });
     }
 
     /**
@@ -465,6 +490,19 @@ export class GameEngine {
                 timingDiff: timeDiff
             });
         }
+
+        if (this.debugger) {
+            const shouldHighlight = hitResult === 'MISS' || hitResult === 'PERFECT' || (this.combo > 0 && this.combo % 25 === 0);
+            if (shouldHighlight) {
+                this.debugger.log('note:hit', {
+                    result: hitResult,
+                    lane: note.lane,
+                    combo: this.combo,
+                    score: this.score,
+                    timingDiff: Math.round(timeDiff)
+                });
+            }
+        }
     }
 
     /**
@@ -510,57 +548,69 @@ export class GameEngine {
      * Complete the current track
      */
     completeCurrentTrack() {
-    if (!this.isPlaying) return;
-    
-    this.isPlaying = false;
-    
-    const gameTime = this.getCurrentGameTime();
-    const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
-    const accuracy = this.trackStats.total > 0 ? 
-        ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
-    
-    const timingStats = this.getTimingStats();
-    
-    const trackResult = {
-        trackIndex: this.currentTrackIndex,
-        trackName: this.currentTrack.name,
-        artistName: this.currentTrack.artists[0]?.name || 'Unknown',
-        playedPercent: Math.round(playedPercent * 100) / 100,
-        requiredPercent: this.requiredPercent,
-        passed: playedPercent >= this.requiredPercent,
-        accuracy: Math.round(accuracy * 100) / 100,
-        score: this.score,
-        maxCombo: this.maxCombo,
-        hitStats: { ...this.trackStats },
-        chartSource: this.currentChart?.metadata?.source || 'unknown',
-        timingStats: timingStats
-    };
-    
-    this.trackResults.push(trackResult);
-    
-    console.log(`Track completed:`, trackResult);
-    
-    if (this.onTrackEnd) {
-        this.onTrackEnd(trackResult);
-    }
-    
-    // IMPORTANT: Advance to next track BEFORE checking completion
-    this.currentTrackIndex++;
-    
-    // Tell the playback system to advance to the next track
-    if (this.currentTrackIndex < this.tracks.length) {
-        // More tracks to play - advance the native playback
-        console.log(`Advancing to track ${this.currentTrackIndex}`);
-        
-        // Use a callback to notify the playback system
-        if (this.onAdvanceTrack) {
-            this.onAdvanceTrack(this.currentTrackIndex);
+        if (!this.isPlaying) return;
+
+        this.isPlaying = false;
+
+        const gameTime = this.getCurrentGameTime();
+        const playedPercent = Math.min(100, (gameTime / this.trackDuration) * 100);
+        const accuracy = this.trackStats.total > 0 ?
+            ((this.trackStats.perfect + this.trackStats.great + this.trackStats.good) / this.trackStats.total) * 100 : 0;
+
+        const timingStats = this.getTimingStats();
+
+        const trackResult = {
+            trackIndex: this.currentTrackIndex,
+            trackName: this.currentTrack.name,
+            artistName: this.currentTrack.artists[0]?.name || 'Unknown',
+            playedPercent: Math.round(playedPercent * 100) / 100,
+            requiredPercent: this.requiredPercent,
+            passed: playedPercent >= this.requiredPercent,
+            accuracy: Math.round(accuracy * 100) / 100,
+            score: this.score,
+            maxCombo: this.maxCombo,
+            hitStats: { ...this.trackStats },
+            chartSource: this.currentChart?.metadata?.source || 'unknown',
+            timingStats: timingStats
+        };
+
+        this.trackResults.push(trackResult);
+
+        console.log(`Track completed:`, trackResult);
+
+        this.debugger?.log('track:complete', {
+            trackId: this.currentTrack?.id,
+            playedPercent: trackResult.playedPercent,
+            requiredPercent: this.requiredPercent,
+            passed: trackResult.passed,
+            accuracy: trackResult.accuracy
+        });
+
+        if (this.onTrackEnd) {
+            this.onTrackEnd(trackResult);
         }
-    } else {
-        // Session complete
-        this.completeSession();
+
+        // IMPORTANT: Advance to next track BEFORE checking completion
+        this.currentTrackIndex++;
+
+        // Tell the playback system to advance to the next track
+        if (this.currentTrackIndex < this.tracks.length) {
+            // More tracks to play - advance the native playback
+            console.log(`Advancing to track ${this.currentTrackIndex}`);
+
+            this.debugger?.log('track:advanceRequest', {
+                nextTrackIndex: this.currentTrackIndex
+            });
+
+            // Use a callback to notify the playback system
+            if (this.onAdvanceTrack) {
+                this.onAdvanceTrack(this.currentTrackIndex);
+            }
+        } else {
+            // Session complete
+            this.completeSession();
+        }
     }
-}
 
     /**
      * Complete the entire session
@@ -582,7 +632,13 @@ export class GameEngine {
         };
         
         console.log('Session completed:', sessionResult);
-        
+
+        this.debugger?.log('session:complete', {
+            totalScore: sessionResult.totalScore,
+            accuracy: sessionResult.overallAccuracy,
+            trackCount: sessionResult.trackResults.length
+        });
+
         if (this.onSessionComplete) {
             this.onSessionComplete(sessionResult);
         }
@@ -692,4 +748,8 @@ export class GameEngine {
     setDifficulty(difficulty) { this.difficulty = difficulty; }
     hasMidiForCurrentTrack() { return this.currentTrack && this.midiGenerator.hasMidiData(this.currentTrack.id); }
     getTracksWithMidi() { return this.midiGenerator.getAvailableTracks(); }
+
+    setDebugger(debuggerInstance) {
+        this.debugger = debuggerInstance;
+    }
 }
