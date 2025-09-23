@@ -70,12 +70,19 @@ export class SpotifyClient {
             await this.handleResponse(response, endpoint);
             
             // Parse response if it has content
-            if (response.status === 204 || response.headers.get('content-length') === '0') {
+            const contentLength = response.headers.get('content-length');
+            if (response.status === 204 || response.status === 205 || contentLength === '0') {
                 return {}; // No content
             }
-            
-            const data = await response.json();
-            return data;
+
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                return await response.json();
+            }
+
+            // Fallback: return raw text to avoid JSON parse errors on non-JSON payloads
+            const text = await response.text();
+            return text ? { raw: text } : {};
             
         } catch (error) {
             console.error(`Spotify API request failed for ${endpoint}:`, error);

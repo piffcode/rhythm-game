@@ -27,15 +27,15 @@ export const config = {
     // Locked tracks for consistent gameplay
     LOCKED_TRACK_IDS: [
         '5FMyXeZ0reYloRTiCkPprT',  // Track 1 - Fixed
-        'lbjDy6IIerHFGZWKG0hno'   // Track 2 - Fixed
-    ], 
-    
+        '0YWmeJtd7Fp1tH3978qUIH'   // Track 2 - Fixed
+    ],
+
     // Pool of tracks for random third selection
     THIRD_TRACK_POOL: [
-        'lbjDy6IIerHFGZWKG0hno',  // Option 1
-        'lbjDy6IIerHFGZWKG0hno',  // Option 2
-        'lbjDy6IIerHFGZWKG0hno',  // Option 3
-        'lbjDy6IIerHFGZWKG0hno'   // Option 4
+        '5FMyXeZ0reYloRTiCkPprT',  // Option 1
+        '0YWmeJtd7Fp1tH3978qUIH',  // Option 2
+        '5FMyXeZ0reYloRTiCkPprT',  // Option 3
+        '0YWmeJtd7Fp1tH3978qUIH'   // Option 4
     ],
     
     // Required Spotify scopes (exact string as specified)
