@@ -101,6 +101,116 @@
             width: 0%;
         }
 
+        /* Additional CSS for the new loading screen */
+        .loading-step {
+            width: 100%;
+            max-width: 450px;
+        }
+
+        .step-content {
+            text-align: center;
+        }
+
+        .step-content.hidden {
+            display: none;
+        }
+
+        .step-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.9;
+        }
+
+        .step-title {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #1db954;
+        }
+
+        .step-description {
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+
+        .step-instructions {
+            text-align: left;
+            max-width: 350px;
+            margin: 0 auto 1.5rem;
+            padding-left: 1rem;
+        }
+
+        .step-instructions li {
+            margin-bottom: 0.8rem;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            opacity: 0.9;
+        }
+
+        .step-note {
+            font-size: 0.85rem;
+            opacity: 0.7;
+            margin-bottom: 2rem;
+            font-style: italic;
+            color: #cccccc;
+        }
+
+        .continue-btn {
+            background: #1db954;
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(29, 185, 84, 0.3);
+            margin-bottom: 1rem;
+        }
+
+        .continue-btn:hover {
+            background: #1ed760;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(29, 185, 84, 0.4);
+        }
+
+        .continue-btn:active {
+            transform: translateY(0);
+        }
+
+        .step-message {
+            font-size: 1.1rem;
+            margin: 1rem 0;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .step-icon {
+                font-size: 3rem;
+            }
+            
+            .step-title {
+                font-size: 1.5rem;
+            }
+            
+            .step-instructions {
+                padding-left: 0.5rem;
+                max-width: 300px;
+            }
+            
+            .step-instructions li {
+                font-size: 0.9rem;
+            }
+            
+            .continue-btn {
+                padding: 14px 28px;
+                font-size: 1rem;
+            }
+        }
+
         .hud {
             position: fixed;
             top: 20px;
@@ -399,13 +509,41 @@
             </div>
         </div>
 
-        <!-- Input Shield (shown during loading) -->
+        <!-- Enhanced Input Shield with New Loading Screen -->
         <div class="input-shield" id="inputShield">
             <div class="shield-content">
-                <div class="spinner"></div>
-                <div style="margin-top: 20px;" id="shieldMessage">Initializing game...</div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
+                <div class="loading-step" id="loadingStep">
+                    <!-- Step 1: Spotify Setup -->
+                    <div class="step-content" id="spotifySetup">
+                        <div class="step-icon">🎵</div>
+                        <h2 class="step-title">Open Spotify First</h2>
+                        <p class="step-description">
+                            Before we start the game, please:
+                        </p>
+                        <ol class="step-instructions">
+                            <li>Open your Spotify app (phone, computer, or web)</li>
+                            <li>Start playing any song to activate your device</li>
+                            <li>Come back here and click Continue</li>
+                        </ol>
+                        <div class="step-note">
+                            This ensures the game can connect to your active Spotify device
+                        </div>
+                        <button class="continue-btn" id="continueBtn" onclick="continueToGame()">
+                            Continue to Game
+                        </button>
+                    </div>
+                    
+                    <!-- Step 2: Loading Game -->
+                    <div class="step-content hidden" id="gameLoading">
+                        <div class="spinner"></div>
+                        <div class="step-message" id="shieldMessage">Initializing game...</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="step-note" id="loadingNote">
+                            Setting up your rhythm game experience...
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -789,6 +927,24 @@
         let initProgress = 0;
         const initSteps = 7; // Reduced steps for native playback
 
+        // Add this function for the new loading screen
+        function continueToGame() {
+            // Hide Spotify setup step
+            document.getElementById('spotifySetup').classList.add('hidden');
+            
+            // Show loading step
+            document.getElementById('gameLoading').classList.remove('hidden');
+            
+            // Start the actual game initialization
+            // This will call your existing initGame() function
+            setTimeout(() => {
+                initGame();
+            }, 500);
+        }
+        
+        // Make function global so it can be called from onclick
+        window.continueToGame = continueToGame;
+
         // Update progress display
         function updateProgress(step, message) {
             initProgress = step;
@@ -800,6 +956,47 @@
             if (progressFill) {
                 progressFill.style.width = `${percentage}%`;
             }
+        }
+
+        // Enhanced updateShieldMessage function
+        function updateShieldMessage(message) {
+            const element = document.getElementById('shieldMessage');
+            const noteElement = document.getElementById('loadingNote');
+            
+            if (element) {
+                element.textContent = message;
+            }
+            
+            // Update the loading note with more specific messages
+            if (noteElement) {
+                switch (message) {
+                    case 'Connecting to Spotify...':
+                        noteElement.textContent = 'Establishing connection with your Spotify account...';
+                        break;
+                    case 'Checking Premium and finding devices...':
+                        noteElement.textContent = 'Looking for your active Spotify device...';
+                        break;
+                    case 'Connecting to native Spotify app...':
+                        noteElement.textContent = 'Connecting to your Spotify app for music playback...';
+                        break;
+                    case 'Initializing game components...':
+                        noteElement.textContent = 'Setting up the rhythm game engine...';
+                        break;
+                    case 'Setting up event handlers...':
+                        noteElement.textContent = 'Configuring game controls and interactions...';
+                        break;
+                    case 'Preparing game session...':
+                        noteElement.textContent = 'Creating your personalized playlist and charts...';
+                        break;
+                    case 'Ready!':
+                        noteElement.textContent = 'Everything is ready! Starting your rhythm game...';
+                        break;
+                    default:
+                        noteElement.textContent = 'Setting up your rhythm game experience...';
+                }
+            }
+            
+            app.debugger?.log('ui:shieldMessage', { message });
         }
 
         // Auto-calibration function
@@ -997,491 +1194,25 @@
 
             } catch (error) {
                 console.error('Game initialization failed:', error);
-                showError(error.message || 'Failed to initialize game');
+                
+                // Enhanced error handling with Spotify-specific messages
+                let errorMessage = error.message;
+                
+                if (error.message.includes('device') || error.message.includes('Spotify')) {
+                    errorMessage = `
+Unable to connect to Spotify. Please make sure:
+
+1. Spotify is open on your device
+2. You're playing music (any song is fine)  
+3. You have a stable internet connection
+4. You have Spotify Premium
+
+Then refresh this page and try again.
+                    `.trim();
+                }
+                
+                showError(errorMessage);
                 app.debugger?.log('init:error', { message: error.message });
                 app.debugger?.setExtraMetrics({ 'Initialization': 'Failed' });
             }
         }
-
-        function setupEventHandlers() {
-            // Input to engine connection
-            app.input.onLaneHit = (lane, time) => {
-                const gameTime = app.timingClock.getTime();
-                const result = app.engine.handleLaneHit(lane, gameTime);
-                if (result) {
-                    app.render.addHitEffect(lane, result.hitType, result.score);
-                    if (result.combo > 10) {
-                        app.render.addComboPopup(result.combo, result.score);
-                    }
-                    if (app.debugger) {
-                        const highlightHit = result.hitType === 'MISS' || result.hitType === 'PERFECT' || (result.combo > 0 && result.combo % 25 === 0);
-                        if (highlightHit) {
-                            app.debugger.log('input:laneHit', {
-                                lane,
-                                hitType: result.hitType,
-                                combo: result.combo,
-                                timingDiff: Math.round(result.timingDiff)
-                            });
-                        }
-                    }
-                } else if (app.debugger) {
-                    app.debugger.log('input:laneHitEmpty', {
-                        lane,
-                        time: Math.round(gameTime)
-                    });
-                }
-            };
-
-            // Engine event handlers
-            app.engine.onTrackStart = (track, requiredPercent) => {
-                console.log(`Track started: ${track.name} (${requiredPercent}% required)`);
-                app.timingClock.start(); // Start precise timing when track starts
-                app.debugger?.setExtraMetrics({ 'Required Percent': `${requiredPercent}%` });
-            };
-
-            app.engine.onTrackEnd = (result) => {
-                app.ui.showTrackComplete(result);
-                app.timingClock.pause();
-                app.debugger?.setExtraMetrics({
-                    'Last Track Accuracy': `${result.accuracy}%`,
-                    'Last Track Result': result.passed ? 'Passed' : 'Failed'
-                });
-
-                if (naturalListening.currentTrackIndex === config.NATURAL_LISTENING.SAVE_PROMPT_TRACK - 1 &&
-                    naturalListening.shouldShowSavePrompt &&
-                    result.currentTrack) {
-                    showSavePrompt(result.currentTrack);
-                }
-            };
-            app.engine.onSessionComplete = (result) => {
-                app.ui.showResults(result);
-                stopGameLoop();
-                app.timingClock.reset();
-                // Auto-calibration is handled per track, no manual panel needed
-                app.debugger?.setExtraMetrics({ 'Session Status': 'Complete' });
-            };
-
-            // Add the track completion callback handlers
-            app.engine.onAdvanceTrack = (trackIndex) => {
-                console.log(`Game engine requesting advance to track ${trackIndex}`);
-                app.debugger?.log('engine:advanceTrack', { trackIndex });
-                // Only advance if we have more tracks to play
-                if (trackIndex < app.engine.tracks.length) {
-                    if (app.playback && app.playback.advanceTrack) {
-                        app.debugger?.log('playback:advanceRequest', { trackIndex });
-                        const advancePromise = app.playback.advanceTrack();
-                        if (advancePromise?.catch) {
-                            advancePromise.catch(error => {
-                                app.debugger?.log('playback:advanceError', { message: error.message });
-                            });
-                        }
-                    } else {
-                        console.error('Playback system does not support advanceTrack method');
-                    }
-                } else {
-                    console.log('No more tracks to advance to - session should be complete');
-                }
-            };
-
-            // Native playback event handlers
-            app.playback.onTrackChange = async (track) => {
-                try {
-                    const currentTrackIndex = app.engine.currentTrackIndex || 0;
-                    console.log(`Track changed: ${track.name}`);
-                    app.debugger?.log('playback:trackChange', {
-                        trackId: track.id,
-                        trackName: track.name,
-                        trackIndex: currentTrackIndex
-                    });
-
-                    // Check if MIDI data exists for this track - MANDATORY
-                    if (!app.engine.midiGenerator.hasMidiData(track.id)) {
-                        const error = `No MIDI data available for track: ${track.name} (${track.id}). Game requires MIDI charts to function.`;
-                        console.error(error);
-                        showError(error);
-                        app.debugger?.log('playback:midiMissing', { trackId: track.id });
-                        return;
-                    }
-
-                    // Get accurate track duration from Spotify API
-                    let trackDuration = track.duration_ms || 180000; // Default fallback
-                    try {
-                        const fullTrack = await app.client.getTrack(track.id);
-                        trackDuration = fullTrack.duration_ms || trackDuration;
-                        console.log(`Track duration from Spotify: ${trackDuration}ms (${(trackDuration/1000).toFixed(1)}s)`);
-                        app.debugger?.setExtraMetrics({ 'Track Duration': `${Math.round(trackDuration)}ms` });
-                    } catch (durationError) {
-                        console.warn('Could not get track duration from Spotify API, using fallback:', trackDuration);
-                        app.debugger?.log('playback:durationFallback', {
-                            trackId: track.id,
-                            message: durationError.message
-                        });
-                    }
-                    app.debugger?.setExtraMetrics({ 'Track Duration': `${Math.round(trackDuration)}ms` });
-
-                    // Initialize natural listening behavior with accurate duration
-                    initializeNaturalListening(currentTrackIndex, trackDuration);
-
-                    // Auto-calibrate for this track
-                    await autoCalibrate();
-
-                    // Reset and start timing clock for new track
-                    app.timingClock.reset();
-                    app.timingClock.start();
-
-                    // ONLY try MIDI - no fallbacks allowed
-                    try {
-                        await app.engine.startTrack(track, null);
-                        console.log('Track started successfully with MIDI chart');
-                        app.debugger?.log('engine:trackStarted', {
-                            trackId: track.id,
-                            chartSource: 'midi'
-                        });
-                    } catch (error) {
-                        const errorMsg = `Failed to start MIDI track: ${track.name}. ${error.message}`;
-                        console.error(errorMsg);
-                        showError(errorMsg);
-                        app.debugger?.log('engine:trackStartError', {
-                            trackId: track.id,
-                            message: error.message
-                        });
-                        return;
-                    }
-
-                } catch (error) {
-                    const errorMsg = `Critical error loading track: ${track.name}. ${error.message}`;
-                    console.error(errorMsg);
-                    showError(errorMsg);
-                    app.debugger?.log('playback:trackError', {
-                        trackId: track.id,
-                        message: error.message
-                    });
-                }
-            };
-
-            app.playback.onStateChange = (state) => {
-                // Sync timing clock with playback state
-                if (state.is_playing && app.timingClock.isPaused) {
-                    app.timingClock.resume();
-                    app.debugger?.log('playback:resumed', { position: state.progress_ms });
-                } else if (!state.is_playing && !app.timingClock.isPaused) {
-                    app.timingClock.pause();
-                    app.debugger?.log('playback:paused', { position: state.progress_ms });
-                }
-            };
-
-            // Enable input after initialization
-            app.input.enable();
-        }
-
-        function setupDebugMode() {
-            const debugPanel = document.getElementById('timingDebug');
-            const metricsElement = document.getElementById('timingInfo');
-            const eventsElement = document.getElementById('debugEvents');
-
-            if (app.debugger) {
-                app.debugger.bindOverlay({
-                    panel: debugPanel,
-                    infoElement: metricsElement,
-                    eventsElement
-                });
-
-                if (config.DEBUG.ENABLED) {
-                    app.debugger.toggle(true);
-                }
-            }
-
-            document.addEventListener('keydown', (e) => {
-                if (e.key.toLowerCase() === 'd') {
-                    const enabled = app.debugger?.toggle();
-                    if (enabled !== undefined) {
-                        app.debugger?.log('debug:hotkey', { enabled });
-                    }
-                }
-            });
-        }
-
-        async function checkPremiumStatus() {
-            try {
-                const devices = await app.client.request('/v1/me/player/devices');
-
-                // Check if any active devices are available
-                if (!devices.devices || devices.devices.length === 0) {
-                    throw new Error('No Spotify devices found. Please open Spotify on your phone, computer, or other device and make sure you\'re logged in, then refresh this page.');
-                }
-
-                // Check if any device is currently active
-                const hasActiveDevice = devices.devices.some(device => device.is_active);
-                app.debugger?.log('devices:discovered', {
-                    total: devices.devices.length,
-                    active: hasActiveDevice
-                });
-                if (!hasActiveDevice) {
-                    // Try to find a device that can be activated
-                    const availableDevice = devices.devices.find(device => !device.is_restricted);
-                    if (!availableDevice) {
-                        throw new Error('No available Spotify devices found. Please start playing music on Spotify (on any device) to activate a device, then refresh this page.');
-                    }
-                }
-                
-            } catch (error) {
-                if (error.status === 403) {
-                    throw new Error(config.ERRORS.NO_PREMIUM);
-                } else if (error.message.includes('Spotify devices') || error.message.includes('available Spotify devices')) {
-                    // Re-throw our custom device messages
-                    throw error;
-                } else {
-                    // Generic device check error
-                    app.debugger?.log('devices:error', { message: error.message });
-                    throw new Error('Unable to connect to Spotify devices. Please make sure Spotify is open and you\'re logged in, then refresh this page.');
-                }
-            }
-        }
-
-        async function startGameSession() {
-            try {
-                // Get user profile
-                const profile = await app.client.request('/v1/me');
-                const country = new URLSearchParams(window.location.search).get('country') ||
-                               sessionStorage.getItem('country') ||
-                               profile.country || 'US';
-                app.debugger?.log('session:profile', {
-                    userId: profile.id,
-                    country
-                });
-
-                // Generate track list
-                const tracks = await generateTrackList(country);
-
-                // CRITICAL: Validate that ALL tracks have MIDI data
-                const tracksWithMidi = tracks.filter(trackId => app.engine.midiGenerator.hasMidiData(trackId));
-                const tracksWithoutMidi = tracks.filter(trackId => !app.engine.midiGenerator.hasMidiData(trackId));
-                
-                console.log(`Tracks with MIDI: ${tracksWithMidi.length}/${tracks.length}`);
-                console.log('Available MIDI tracks:', tracksWithMidi);
-                
-                if (tracksWithoutMidi.length > 0) {
-                    console.warn('Tracks missing MIDI:', tracksWithoutMidi);
-                }
-                
-                if (tracksWithMidi.length === 0) {
-                    throw new Error('No tracks with MIDI data available. Game requires MIDI charts to function.');
-                }
-                
-                // Use only tracks that have MIDI data
-                const finalTracks = tracksWithMidi;
-                console.log(`Using ${finalTracks.length} tracks with MIDI data`);
-                app.debugger?.log('session:tracksSelected', {
-                    total: finalTracks.length,
-                    trackIds: finalTracks
-                });
-
-                // Create playlists in parallel
-                const playlistNames = generatePlaylistNames(country);
-                const [publicPlaylist, privatePlaylist] = await Promise.all([
-                    createPlaylist(profile.id, playlistNames.public, true).catch(() => null),
-                    createPlaylist(profile.id, playlistNames.private, false).catch(() => null)
-                ]);
-
-                // Add tracks to playlists (non-blocking)
-                const trackUris = finalTracks.map(id => `spotify:track:${id}`);
-                if (publicPlaylist) {
-                    addTracksToPlaylist(publicPlaylist.id, trackUris).catch(console.warn);
-                }
-                if (privatePlaylist) {
-                    addTracksToPlaylist(privatePlaylist.id, trackUris).catch(console.warn);
-                }
-
-                // Initialize game session with MIDI-validated tracks
-                app.engine.initializeSession(finalTracks, profile.id, generateUUID());
-                app.debugger?.setExtraMetrics({ 'Session Status': 'In Progress' });
-
-                // Start playlist on user's native Spotify app
-                const playlistToUse = publicPlaylist || privatePlaylist;
-                if (playlistToUse) {
-                    updateShieldMessage('Starting playlist on your Spotify app...');
-                    await app.playback.startPlayback(playlistToUse.uri, 0);
-                    app.playback.lockControls(playlistToUse.uri, finalTracks);
-                    app.debugger?.log('session:playbackStarted', {
-                        playlist: playlistToUse.name,
-                        trackCount: finalTracks.length
-                    });
-                    if (playlistToUse.name) {
-                        app.debugger?.setExtraMetrics({ 'Active Playlist': playlistToUse.name });
-                    }
-                } else {
-                    throw new Error('Failed to create any playlists');
-                }
-
-            } catch (error) {
-                console.error('Failed to start game session:', error);
-                app.debugger?.log('session:error', { message: error.message });
-                throw new Error('Failed to start game session: ' + error.message);
-            }
-        }
-
-        function startGameLoop() {
-            let lastTime = performance.now();
-
-            function gameLoop(currentTime) {
-                if (!app.isInitialized) return;
-
-                const deltaTime = currentTime - lastTime;
-                lastTime = currentTime;
-
-                // Get current position from Spotify playback
-                let spotifyPosition = 0;
-                if (app.playback && app.playback.getIsPlaying()) {
-                    spotifyPosition = app.playback.getPositionMs();
-                    checkNaturalSkip(spotifyPosition);
-                }
-
-                // Use our high-precision timing clock, but sync with Spotify periodically
-                let gameTime = app.timingClock.getTime();
-                
-                // Sync with Spotify position every 2 seconds if there's significant drift
-                if (spotifyPosition > 0) {
-                    const drift = Math.abs(gameTime - spotifyPosition);
-                    if (drift > 200) { // More than 200ms drift
-                        console.log(`Syncing game time: ${gameTime}ms -> ${spotifyPosition}ms (drift: ${drift}ms)`);
-                        app.timingClock.reset();
-                        app.timingClock.start();
-                        // Adjust the start time to match Spotify
-                        app.timingClock.startTime = performance.now() - spotifyPosition;
-                        gameTime = spotifyPosition;
-                        app.debugger?.log('timing:resync', { drift: Math.round(drift), target: Math.round(spotifyPosition) });
-                    }
-                }
-
-                // Update game components
-                app.engine.update(deltaTime, gameTime);
-                app.input.update();
-                app.ui.update(app.engine.getGameState());
-
-                // Render frame
-                app.render.render(app.engine.getGameState());
-
-                // Continue loop
-                app.gameLoopId = requestAnimationFrame(gameLoop);
-            }
-
-            app.gameLoopId = requestAnimationFrame(gameLoop);
-        }
-
-        function stopGameLoop() {
-            if (app.gameLoopId) {
-                cancelAnimationFrame(app.gameLoopId);
-                app.gameLoopId = null;
-            }
-        }
-
-        async function generateTrackList(country) {
-            const lockedTracks = config.LOCKED_TRACK_IDS;
-            
-            try {
-                const fallback = await app.client.getRecommendations({
-                    seed_genres: 'pop,dance',
-                    market: country,
-                    limit: 1
-                });
-
-                if (fallback.tracks && fallback.tracks.length > 0) {
-                    return [...lockedTracks, fallback.tracks[0].id];
-                }
-            } catch (error) {
-                console.warn('Recommendations failed:', error);
-            }
-
-            return [...lockedTracks, lockedTracks[0]];
-        }
-
-function generatePlaylistNames(country) {
-    const names = [
-        'my mix', 'current rotation', 'on repeat', 'lately', 'vibes',
-        'summer nights', 'drive music', 'good stuff', 'favorites', 'new finds',
-        'mood', 'chill mix', 'bangers', 'late night', 'feel good',
-        'weekend', 'daily driver', 'fresh', 'liked songs pt. 2', 'study vibes',
-        'workout', 'road trip', 'throwbacks', 'hits different', 'no skips',
-        'that playlist', 'main character energy', 'gym', 'car songs', 'rain day',
-        'golden hour', 'untitled', '✨ vibes ✨', 'idc what anyone says', 'songs i fw',
-        'this month', 'lowkey fire', 'comfort songs', 'winter feels',
-        'midnight thoughts', 'shower songs', 'cooking playlist', 'gaming music',
-        'work from home', 'sunset drives', 'running mix', 'party mode',
-        'sleepy time', 'morning coffee', 'house cleaning', 'focus mode',
-        'rainy days', 'spring cleaning', 'roadtrip 2024', 'guilty pleasures',
-        'throwback thursday', 'sunday morning', 'study session', 'pre-game',
-        'after hours', 'background music', 'nostalgic feels', 'energy boost',
-        'chill sunday', 'late night drives', 'good energy only', 'motivation',
-        'car karaoke', 'walk the dog', 'cleaning house', 'cooking dinner',
-        'getting ready', 'wind down', 'productivity', 'happy songs',
-        'sad girl hours', 'confidence boost', 'beach day', 'autumn vibes',
-        'cozy evening', 'dance party', 'sing along', 'discover weekly pt 2'
-    ];
-    
-    const selectedName = names[Math.floor(Math.random() * names.length)];
-    
-    return {
-        public: selectedName,
-        private: selectedName
-    };
-}
-
-        async function createPlaylist(userId, name, isPublic) {
-            return await app.client.createPlaylist(userId, {
-                name: name,
-                public: isPublic
-                // No description - will be blank
-            });
-        }
-
-        async function addTracksToPlaylist(playlistId, uris) {
-            await app.client.addTracksToPlaylist(playlistId, uris);
-        }
-
-        function generateUUID() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                const r = Math.random() * 16 | 0;
-                const v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-
-        function updateShieldMessage(message) {
-            const element = document.getElementById('shieldMessage');
-            if (element) {
-                element.textContent = message;
-            }
-            app.debugger?.log('ui:shieldMessage', { message });
-        }
-
-        function showError(message) {
-            document.getElementById('errorMessage').textContent = message;
-            document.getElementById('errorScreen').style.display = 'flex';
-            app.debugger?.log('ui:error', { message });
-        }
-
-        // Handle page visibility changes
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden && app.isInitialized && app.timingClock) {
-                app.timingClock.pause();
-            } else if (!document.hidden && app.isInitialized && app.timingClock && app.playback?.getIsPlaying()) {
-                app.timingClock.resume();
-            }
-        });
-
-        // Handle beforeunload
-        window.addEventListener('beforeunload', () => {
-            if (app.playback) {
-                app.playback.unlockControls();
-            }
-            if (app.timingClock) {
-                app.timingClock.reset();
-            }
-            stopGameLoop();
-        });
-
-        // Initialize the game when page loads
-        initGame();
-    </script>
-</body>
-</html>
