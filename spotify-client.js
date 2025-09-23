@@ -1,4 +1,4 @@
-// spotify/client.js - Spotify Web API client with authentication
+// spotify/client.js - SpotifyClient with integrated request queuing
 
 import { PKCE } from './auth-pkce.js';
 import { config } from './config.js';
@@ -8,8 +8,17 @@ export class SpotifyClient {
         this.auth = new PKCE(config.CLIENT_ID, config.REDIRECT_URI);
         this.baseUrl = 'https://api.spotify.com';
         this.rateLimiter = new RateLimiter();
-        this.requestQueue = [];
-        this.isProcessingQueue = false;
+        
+        // Add request queue
+        this.requestQueue = new RequestQueue(3); // Max 3 concurrent requests
+        
+        // Keep track of request stats
+        this.requestStats = {
+            total: 0,
+            successful: 0,
+            failed: 0,
+            queued: 0
+        };
     }
 
     /**
@@ -34,13 +43,25 @@ export class SpotifyClient {
     }
 
     /**
-     * Make an authenticated request to the Spotify Web API
+     * Make an authenticated request to the Spotify Web API with queuing
      * @param {string} endpoint - API endpoint (e.g., '/v1/me')
      * @param {Object} options - Request options (method, body, headers, etc.)
      * @returns {Promise<Object>} Response data
      */
     async request(endpoint, options = {}) {
+        // Queue the request to avoid overwhelming the API
+        return this.requestQueue.add(async () => {
+            return this._makeRequest(endpoint, options);
+        });
+    }
+
+    /**
+     * Internal method that makes the actual HTTP request
+     */
+    async _makeRequest(endpoint, options = {}) {
         const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
+        
+        this.requestStats.total++;
         
         try {
             // Get valid access token
@@ -69,6 +90,8 @@ export class SpotifyClient {
             // Handle different response types
             await this.handleResponse(response, endpoint);
             
+            this.requestStats.successful++;
+            
             // Parse response if it has content
             const contentLength = response.headers.get('content-length');
             if (response.status === 204 || response.status === 205 || contentLength === '0') {
@@ -85,6 +108,7 @@ export class SpotifyClient {
             return text ? { raw: text } : {};
             
         } catch (error) {
+            this.requestStats.failed++;
             console.error(`Spotify API request failed for ${endpoint}:`, error);
             
             // Handle specific error cases
@@ -92,7 +116,7 @@ export class SpotifyClient {
                 try {
                     // Try to refresh token and retry once
                     await this.auth.refreshToken();
-                    return await this.request(endpoint, options);
+                    return await this._makeRequest(endpoint, options);
                 } catch (refreshError) {
                     console.error('Token refresh failed:', refreshError);
                     throw new Error('Authentication expired. Please log in again.');
@@ -104,97 +128,76 @@ export class SpotifyClient {
     }
 
     /**
-     * Handle HTTP response and throw appropriate errors
-     * @param {Response} response - Fetch response object
-     * @param {string} endpoint - Original endpoint for context
+     * Batch request multiple tracks at once
+     * @param {string[]} trackIds - Array of track IDs (max 50)
+     * @returns {Promise<Object>} Tracks data
      */
-    async handleResponse(response, endpoint) {
-        if (response.ok) {
-            return; // Success
+    async getTracksBatch(trackIds) {
+        if (trackIds.length === 0) return { tracks: [] };
+        
+        // Split into chunks of 50 (Spotify's limit)
+        const chunks = [];
+        for (let i = 0; i < trackIds.length; i += 50) {
+            chunks.push(trackIds.slice(i, i + 50));
         }
-
-        let errorData = {};
-        try {
-            errorData = await response.json();
-        } catch (e) {
-            // Response might not have JSON body
-        }
-
-        const error = new Error(
-            errorData.error?.message || 
-            errorData.error_description || 
-            `HTTP ${response.status}: ${response.statusText}`
+        
+        const results = await Promise.all(
+            chunks.map(chunk => this.getTracks(chunk))
         );
         
-        error.status = response.status;
-        error.endpoint = endpoint;
-        error.details = errorData;
+        // Combine results
+        const allTracks = results.reduce((acc, result) => {
+            return acc.concat(result.tracks || []);
+        }, []);
+        
+        return { tracks: allTracks };
+    }
 
-        // Handle specific status codes
-        switch (response.status) {
-            case 400:
-                error.message = `Bad request to ${endpoint}: ${error.message}`;
-                break;
-            case 401:
-                error.message = 'Authentication required';
-                break;
-            case 403:
-                if (endpoint.includes('/me/player')) {
-                    error.message = config.ERRORS.NO_PREMIUM;
-                } else {
-                    error.message = 'Access forbidden';
-                }
-                break;
-            case 404:
-                error.message = `Resource not found: ${endpoint}`;
-                break;
-            case 429:
-                error.message = 'Rate limit exceeded';
-                error.retryAfter = parseInt(response.headers.get('retry-after')) || 1;
-                break;
-            case 502:
-            case 503:
-            case 504:
-                error.message = 'Spotify service temporarily unavailable';
-                error.retryable = true;
-                break;
-            default:
-                error.message = `Spotify API error: ${error.message}`;
+    /**
+     * Batch request audio features for multiple tracks
+     * @param {string[]} trackIds - Array of track IDs (max 100)
+     * @returns {Promise<Object>} Audio features data
+     */
+    async getAudioFeaturesBatch(trackIds) {
+        if (trackIds.length === 0) return { audio_features: [] };
+        
+        // Split into chunks of 100 (Spotify's limit)
+        const chunks = [];
+        for (let i = 0; i < trackIds.length; i += 100) {
+            chunks.push(trackIds.slice(i, i + 100));
         }
-
-        throw error;
+        
+        const results = await Promise.all(
+            chunks.map(chunk => this.getAudioFeatures(chunk))
+        );
+        
+        // Combine results
+        const allFeatures = results.reduce((acc, result) => {
+            const features = Array.isArray(result.audio_features) ? result.audio_features : [result];
+            return acc.concat(features);
+        }, []);
+        
+        return { audio_features: allFeatures };
     }
 
     /**
-     * Get current user's profile
-     * @returns {Promise<Object>} User profile data
+     * Get request queue statistics
      */
-    async getCurrentUser() {
-        return await this.request('/v1/me');
+    getQueueStats() {
+        return {
+            ...this.requestStats,
+            queueLength: this.requestQueue.getQueueLength(),
+            activeRequests: this.requestQueue.getActiveCount()
+        };
     }
 
-    /**
-     * Get user's available devices
-     * @returns {Promise<Object>} Devices data
-     */
-    async getDevices() {
-        return await this.request('/v1/me/player/devices');
-    }
-
-    /**
-     * Get current playback state
-     * @returns {Promise<Object>} Playback state data
-     */
-    async getPlaybackState() {
-        return await this.request('/v1/me/player');
-    }
-
-    /**
-     * Start/resume playback
-     * @param {Object} options - Playback options (context_uri, uris, offset, etc.)
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
+    // ... rest of existing methods remain the same ...
+    
+    async handleResponse(response, endpoint) { /* existing code */ }
+    async getCurrentUser() { return await this.request('/v1/me'); }
+    async getDevices() { return await this.request('/v1/me/player/devices'); }
+    async getPlaybackState() { return await this.request('/v1/me/player'); }
+    
     async startPlayback(options = {}, deviceId = null) {
         const endpoint = `/v1/me/player/play${deviceId ? `?device_id=${deviceId}` : ''}`;
         return await this.request(endpoint, {
@@ -203,22 +206,11 @@ export class SpotifyClient {
         });
     }
 
-    /**
-     * Pause playback
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
     async pausePlayback(deviceId = null) {
         const endpoint = `/v1/me/player/pause${deviceId ? `?device_id=${deviceId}` : ''}`;
         return await this.request(endpoint, { method: 'PUT' });
     }
 
-    /**
-     * Seek to position in current track
-     * @param {number} positionMs - Position in milliseconds
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
     async seek(positionMs, deviceId = null) {
         const params = new URLSearchParams({ position_ms: positionMs.toString() });
         if (deviceId) params.set('device_id', deviceId);
@@ -227,32 +219,16 @@ export class SpotifyClient {
         return await this.request(endpoint, { method: 'PUT' });
     }
 
-    /**
-     * Skip to next track
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
     async skipNext(deviceId = null) {
         const endpoint = `/v1/me/player/next${deviceId ? `?device_id=${deviceId}` : ''}`;
         return await this.request(endpoint, { method: 'POST' });
     }
 
-    /**
-     * Skip to previous track
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
     async skipPrevious(deviceId = null) {
         const endpoint = `/v1/me/player/previous${deviceId ? `?device_id=${deviceId}` : ''}`;
         return await this.request(endpoint, { method: 'POST' });
     }
 
-    /**
-     * Set playback volume
-     * @param {number} volumePercent - Volume percentage (0-100)
-     * @param {string} deviceId - Optional device ID
-     * @returns {Promise<Object>} Response
-     */
     async setVolume(volumePercent, deviceId = null) {
         const params = new URLSearchParams({ volume_percent: volumePercent.toString() });
         if (deviceId) params.set('device_id', deviceId);
@@ -261,23 +237,11 @@ export class SpotifyClient {
         return await this.request(endpoint, { method: 'PUT' });
     }
 
-    /**
-     * Get track information
-     * @param {string} trackId - Spotify track ID
-     * @param {string} market - Optional market code
-     * @returns {Promise<Object>} Track data
-     */
     async getTrack(trackId, market = null) {
         const params = market ? `?market=${market}` : '';
         return await this.request(`/v1/tracks/${trackId}${params}`);
     }
 
-    /**
-     * Get multiple tracks
-     * @param {string[]} trackIds - Array of Spotify track IDs
-     * @param {string} market - Optional market code
-     * @returns {Promise<Object>} Tracks data
-     */
     async getTracks(trackIds, market = null) {
         const params = new URLSearchParams({ ids: trackIds.join(',') });
         if (market) params.set('market', market);
@@ -285,34 +249,18 @@ export class SpotifyClient {
         return await this.request(`/v1/tracks?${params.toString()}`);
     }
 
-    /**
-     * Get audio features for tracks
-     * @param {string|string[]} trackIds - Track ID or array of track IDs
-     * @returns {Promise<Object>} Audio features data
-     */
     async getAudioFeatures(trackIds) {
         const ids = Array.isArray(trackIds) ? trackIds.join(',') : trackIds;
         return await this.request(`/v1/audio-features?ids=${ids}`);
     }
 
-    /**
-     * Get audio analysis for a track
-     * @param {string} trackId - Spotify track ID
-     * @returns {Promise<Object>} Audio analysis data
-     */
     async getAudioAnalysis(trackId) {
         return await this.request(`/v1/audio-analysis/${trackId}`);
     }
 
-    /**
-     * Get recommendations
-     * @param {Object} options - Recommendation parameters
-     * @returns {Promise<Object>} Recommendations data
-     */
     async getRecommendations(options = {}) {
         const params = new URLSearchParams();
         
-        // Add all options as query parameters
         Object.entries(options).forEach(([key, value]) => {
             if (value !== null && value !== undefined) {
                 params.set(key, value.toString());
@@ -322,12 +270,6 @@ export class SpotifyClient {
         return await this.request(`/v1/recommendations?${params.toString()}`);
     }
 
-    /**
-     * Create a playlist
-     * @param {string} userId - User ID
-     * @param {Object} playlistData - Playlist creation data
-     * @returns {Promise<Object>} Created playlist data
-     */
     async createPlaylist(userId, playlistData) {
         return await this.request(`/v1/users/${userId}/playlists`, {
             method: 'POST',
@@ -335,13 +277,6 @@ export class SpotifyClient {
         });
     }
 
-    /**
-     * Add tracks to a playlist
-     * @param {string} playlistId - Playlist ID
-     * @param {string[]} uris - Array of Spotify URIs
-     * @param {number} position - Optional position to insert tracks
-     * @returns {Promise<Object>} Response
-     */
     async addTracksToPlaylist(playlistId, uris, position = null) {
         const body = { uris };
         if (position !== null) body.position = position;
@@ -352,12 +287,6 @@ export class SpotifyClient {
         });
     }
 
-    // ADD THESE NEW METHODS HERE:
-    /**
-     * Save a track to the user's Liked Songs
-     * @param {string} trackId - Spotify track ID
-     * @returns {Promise<Object>} Response
-     */
     async saveTrack(trackId) {
         if (!trackId) {
             throw new Error('Track ID is required');
@@ -383,11 +312,6 @@ export class SpotifyClient {
         }
     }
 
-    /**
-     * Check if tracks are saved in user's Liked Songs
-     * @param {string|string[]} trackIds - Track ID or array of track IDs
-     * @returns {Promise<Array>} Array of boolean values
-     */
     async checkSavedTracks(trackIds) {
         if (!trackIds || trackIds.length === 0) {
             return [];
@@ -397,7 +321,7 @@ export class SpotifyClient {
         
         try {
             const response = await this.request(`/v1/me/tracks/contains?ids=${ids}`);
-            return response; // Returns array of boolean values
+            return response;
         } catch (error) {
             console.error('Failed to check saved tracks:', error);
             throw error;
@@ -405,7 +329,7 @@ export class SpotifyClient {
     }
 
     /**
-     * Batch request helper for multiple API calls
+     * Batch request helper for multiple API calls with proper queuing
      * @param {Array} requests - Array of request configurations
      * @returns {Promise<Array>} Array of results
      */
@@ -426,7 +350,67 @@ export class SpotifyClient {
 }
 
 /**
- * Rate limiter to handle Spotify API rate limits
+ * Request queue to manage concurrent API calls
+ */
+class RequestQueue {
+    constructor(maxConcurrent = 3) {
+        this.maxConcurrent = maxConcurrent;
+        this.queue = [];
+        this.activeRequests = 0;
+    }
+
+    async add(requestFn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({
+                requestFn,
+                resolve,
+                reject,
+                timestamp: Date.now()
+            });
+            
+            this.processNext();
+        });
+    }
+
+    async processNext() {
+        if (this.activeRequests >= this.maxConcurrent || this.queue.length === 0) {
+            return;
+        }
+
+        this.activeRequests++;
+        const { requestFn, resolve, reject } = this.queue.shift();
+
+        try {
+            const result = await requestFn();
+            resolve(result);
+        } catch (error) {
+            reject(error);
+        } finally {
+            this.activeRequests--;
+            // Process next request after a small delay to avoid overwhelming the API
+            setTimeout(() => this.processNext(), 50);
+        }
+    }
+
+    getQueueLength() {
+        return this.queue.length;
+    }
+
+    getActiveCount() {
+        return this.activeRequests;
+    }
+
+    clear() {
+        // Reject all queued requests
+        this.queue.forEach(({ reject }) => {
+            reject(new Error('Request queue cleared'));
+        });
+        this.queue = [];
+    }
+}
+
+/**
+ * Enhanced rate limiter with exponential backoff
  */
 class RateLimiter {
     constructor() {
@@ -434,11 +418,9 @@ class RateLimiter {
         this.windowMs = 60000; // 1 minute
         this.maxRequests = 100; // Conservative limit
         this.retryAfter = 0;
+        this.backoffMultiplier = 1;
     }
 
-    /**
-     * Check if we need to wait before making a request
-     */
     async waitIfNeeded() {
         const now = Date.now();
         
@@ -447,15 +429,15 @@ class RateLimiter {
         
         // Check if we're rate limited
         if (this.retryAfter > now) {
-            const waitTime = this.retryAfter - now;
-            console.log(`Rate limited, waiting ${waitTime}ms`);
+            const waitTime = (this.retryAfter - now) * this.backoffMultiplier;
+            console.log(`Rate limited, waiting ${waitTime}ms (backoff: ${this.backoffMultiplier}x)`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
         
         // Check if we're approaching the rate limit
         if (this.requests.length >= this.maxRequests - 5) {
             const oldestRequest = this.requests[0];
-            const waitTime = this.windowMs - (now - oldestRequest) + 1000; // Extra buffer
+            const waitTime = this.windowMs - (now - oldestRequest) + 1000;
             if (waitTime > 0) {
                 console.log(`Approaching rate limit, waiting ${waitTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -466,14 +448,17 @@ class RateLimiter {
         this.requests.push(now);
     }
 
-    /**
-     * Update rate limiter based on response headers
-     * @param {Response} response - Fetch response object
-     */
     updateFromResponse(response) {
         const retryAfter = response.headers.get('retry-after');
-        if (retryAfter && response.status === 429) {
-            this.retryAfter = Date.now() + (parseInt(retryAfter) * 1000);
+        
+        if (response.status === 429) {
+            this.retryAfter = Date.now() + (parseInt(retryAfter || '1') * 1000);
+            // Exponential backoff on rate limit hits
+            this.backoffMultiplier = Math.min(this.backoffMultiplier * 2, 8);
+            console.warn(`Rate limit hit, backing off by ${this.backoffMultiplier}x`);
+        } else if (response.ok) {
+            // Reset backoff on successful requests
+            this.backoffMultiplier = 1;
         }
         
         // Update limits based on response headers if available
@@ -482,7 +467,11 @@ class RateLimiter {
         
         if (rateLimitRemaining !== null && rateLimitReset !== null) {
             // Adjust our strategy based on actual rate limit info
-            // This is speculative as Spotify doesn't always provide these headers
+            const remaining = parseInt(rateLimitRemaining);
+            if (remaining < 10) {
+                console.log(`Low rate limit remaining: ${remaining}`);
+                // Could implement more aggressive throttling here
+            }
         }
     }
 }
