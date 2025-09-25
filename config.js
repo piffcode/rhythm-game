@@ -34,7 +34,8 @@ export const config = {
     THIRD_TRACK_POOL: [
         '2FDTHlrBguDzQkp7PVj16Q',
         '02BNcawEW0KlzLW9DeHzXZJ'
-        '4pftaoQbbheCXSdleWIeDK'
+        '3O8NlPh2LByMU9lSRSHedm'
+        '3NxAG2ni1lLa8RKL6a0INc'
     ],
     
     // Required Spotify scopes (exact string as specified)
