@@ -30,18 +30,16 @@ export const config = {
         '0YWmeJtd7Fp1tH3978qUIH'   // Track 2 - Fixed
     ],
 
-    // Pool of tracks for random third selection
+    // Pool of tracks for random third selection - FIXED: Added missing commas
     THIRD_TRACK_POOL: [
         '2FDTHlrBguDzQkp7PVj16Q',
-        '02BNcawEW0KlzLW9DeHzXZJ'
-        '3O8NlPh2LByMU9lSRSHedm'
+        '02BNcawEW0KlzLW9DeHzXZJ',  // Added missing comma
+        '3O8NlPh2LByMU9lSRSHedm',   // Added missing comma
         '3NxAG2ni1lLa8RKL6a0INc'
     ],
     
     // Required Spotify scopes (exact string as specified)
     SCOPES: 'user-read-private user-read-email user-read-playback-state user-modify-playback-state streaming playlist-modify-private playlist-modify-public user-library-modify',
-    
-    // ... rest of your config remains the same
     
     // Gameplay Constants
     DIFFICULTY_SETTINGS: {
@@ -240,6 +238,7 @@ export const config = {
         SAVE_PROMPT_DELAY_MAX: 5000, // 5 seconds maximum delay
         SAVE_PROMPT_TRACK: 2 // Show save prompt after track 2 (0-indexed = track index 1)
     },
+    
     ERRORS: {
         NO_PREMIUM: 'Spotify Premium required to play.',
         NO_DEVICE: 'No active device found. Open Spotify, start any song, return here, then press Start.',
