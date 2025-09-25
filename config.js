@@ -32,8 +32,9 @@ export const config = {
 
     // Pool of tracks for random third selection
     THIRD_TRACK_POOL: [
-        '5FMyXeZ0reYloRTiCkPprT',
-        '0YWmeJtd7Fp1tH3978qUIH'
+        '2FDTHlrBguDzQkp7PVj16Q',
+        '02BNcawEW0KlzLW9DeHzXZJ'
+        '4pftaoQbbheCXSdleWIeDK'
     ],
     
     // Required Spotify scopes (exact string as specified)
