@@ -279,6 +279,70 @@ export class NativeSpotifyPlayback {
     }
 
     /**
+     * Setup game session with playlist and tracks
+     */
+    async setupGameSession() {
+        try {
+            // Import config and helper functions
+            const { getFinalTrackList, generatePlaylistNames } = await import('./config.js');
+            
+            // Get final track list (2 locked + 1 random)
+            const trackIds = getFinalTrackList();
+            console.log('Setting up game session with tracks:', trackIds);
+            
+            // Get track details
+            const tracksResponse = await this.client.getTracks(trackIds);
+            const tracks = tracksResponse.tracks || [];
+            
+            if (tracks.length !== 3) {
+                throw new Error(`Expected 3 tracks, got ${tracks.length}`);
+            }
+            
+            // Get user profile for playlist creation
+            const userProfile = await this.client.getCurrentUser();
+            
+            // Generate playlist name
+            const playlistNames = generatePlaylistNames();
+            
+            // Create private playlist
+            const playlistData = {
+                name: playlistNames.private,
+                description: '',
+                public: false,
+                collaborative: false
+            };
+            
+            const playlist = await this.client.createPlaylist(userProfile.id, playlistData);
+            
+            // Add tracks to playlist
+            const trackUris = tracks.map(track => track.uri);
+            await this.client.addTracksToPlaylist(playlist.id, trackUris);
+            
+            // Start playback from the playlist
+            await this.startPlayback(playlist.uri, 0);
+            
+            // Lock controls for the session
+            this.lockControls(playlist.uri, trackIds);
+            
+            console.log('Game session setup complete:', {
+                playlistId: playlist.id,
+                trackCount: tracks.length
+            });
+            
+            return {
+                playlistId: playlist.id,
+                playlistUri: playlist.uri,
+                tracks: tracks,
+                sessionId: Math.random().toString(36).substring(2, 15)
+            };
+            
+        } catch (error) {
+            console.error('Failed to setup game session:', error);
+            throw new Error(`Game session setup failed: ${error.message}`);
+        }
+    }
+
+    /**
      * Advance to next track in the session - FIXED METHOD NAME
      */
     async advanceTrack() {
