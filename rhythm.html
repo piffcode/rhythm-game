@@ -1271,7 +1271,7 @@
                 app.input.onLaneHit = (lane, inputTime) => {
                     const result = app.engine.handleLaneHit(lane, inputTime);
                     if (result && app.render) {
-                        app.render.showHitEffect(lane, result.hitType);
+                        app.render.showHitEffect(lane, result.hitType, result);
                     }
                 };
 

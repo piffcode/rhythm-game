@@ -283,7 +283,9 @@ export class GameEngine {
                     spawned: true,
                     spawnTime: gameTime,
                     isHit: false,
-                    progress: 0
+                    progress: 0,
+                    renderProgress: 0,
+                    renderEndProgress: note.type === 'hold' ? 0 : undefined
                 };
                 
                 this.activeNotes.push(activeNote);
@@ -299,22 +301,44 @@ export class GameEngine {
      */
     updateNotes(gameTime, deltaTime) {
         const approachTime = config.DIFFICULTY_SETTINGS[this.difficulty].approachTime;
-        
+        const clampedDelta = Math.min(Math.max(deltaTime || 16.67, 0), 100);
+        const smoothing = clampedDelta === 0 ? 0.5 : 1 - Math.pow(0.5, clampedDelta / 16.67);
+
         // Update positions and remove old notes
         this.activeNotes = this.activeNotes.filter(note => {
             const timeDiff = note.time - gameTime;
             const missWindow = config.TIMING_WINDOWS.GOOD;
-            
+
             // Remove notes that are too far past
             if (timeDiff < -missWindow - 200) {
                 return false;
             }
-            
-            // Calculate progress (0 = spawned, 1 = at hit line)
-            const totalTime = this.noteSpawnLookahead;
-            const elapsed = gameTime - note.spawnTime;
-            note.progress = Math.max(0, Math.min(1, elapsed / totalTime));
-            
+
+            const rawProgress = 1 - (timeDiff / approachTime);
+            const clampedProgress = Math.max(-0.2, Math.min(1.2, rawProgress));
+
+            if (!Number.isFinite(note.renderProgress)) {
+                note.renderProgress = clampedProgress;
+            } else {
+                note.renderProgress += (clampedProgress - note.renderProgress) * smoothing;
+            }
+
+            note.progress = clampedProgress;
+
+            if (note.type === 'hold' && typeof note.endTime === 'number') {
+                const endTimeDiff = note.endTime - gameTime;
+                const rawEndProgress = 1 - (endTimeDiff / approachTime);
+                const clampedEndProgress = Math.max(-0.2, Math.min(1.2, rawEndProgress));
+
+                if (!Number.isFinite(note.renderEndProgress)) {
+                    note.renderEndProgress = clampedEndProgress;
+                } else {
+                    note.renderEndProgress += (clampedEndProgress - note.renderEndProgress) * smoothing;
+                }
+
+                note.endProgress = clampedEndProgress;
+            }
+
             return true;
         });
     }
