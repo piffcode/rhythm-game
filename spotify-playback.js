@@ -30,6 +30,11 @@ export class SpotifyPlayback {
         
         // Calibration offset from user calibration
         this.calibrationOffset = parseInt(localStorage.getItem('rhythmCalibrationOffset')) || 0;
+
+         // Add these new hybrid mode properties:
+    this.activePlaybackDevice = null;  // Track which device is actually playing audio
+    this.isHybridMode = false;         // Track if we're in hybrid mode
+}
     }
 
     /**
@@ -236,29 +241,59 @@ export class SpotifyPlayback {
     }
 
     /**
-     * Advance to next track in session
-     */
-    async advanceToNextTrack() {
-        if (!this.controlsLocked || !this.sessionContext) return;
-
-        this.isAutoAdvancing = true;
-        this.expectedTrackIndex++;
-
-        try {
-            await this.client.skipNext(this.deviceId);
-            console.log('Advanced to track index:', this.expectedTrackIndex);
-        } catch (error) {
-            console.error('Failed to advance track:', error);
-            // Try alternative method
-            await this.snapToExpectedTrack();
-        } finally {
-            // Clear auto-advancing flag after a brief delay
-            setTimeout(() => {
-                this.isAutoAdvancing = false;
-            }, 2000);
-        }
+ * Advance to next track in session (hybrid mode)
+ */
+async advanceToNextTrack() {
+    if (!this.controlsLocked || !this.sessionContext) {
+        console.log('Cannot advance - controls not locked or no session context');
+        return;
     }
 
+    if (this.expectedTrackIndex >= 2) {
+        console.log('Cannot advance - already at last track');
+        return;
+    }
+
+    if (this.isAutoAdvancing) {
+        console.log('Cannot advance - already advancing');
+        return;
+    }
+
+    this.isAutoAdvancing = true;
+    this.expectedTrackIndex++;
+
+    console.log(`Advancing to track index: ${this.expectedTrackIndex}`);
+
+    try {
+        if (this.isHybridMode && this.activePlaybackDevice) {
+            // Use API to control user's device
+            await this.client.skipNext(this.activePlaybackDevice);
+            console.log('Hybrid mode: Advanced track on user device via API');
+        } else {
+            // Use Web SDK for both control and playback
+            await this.player.nextTrack();
+            console.log('Web SDK mode: Advanced track via SDK');
+        }
+    } catch (error) {
+        console.error('Failed to advance track:', error);
+        // Fallback: try the other method
+        try {
+            if (this.isHybridMode) {
+                await this.player.nextTrack();
+                console.log('Fallback: Used Web SDK to advance');
+            } else {
+                await this.client.skipNext(this.deviceId);
+                console.log('Fallback: Used API to advance');
+            }
+        } catch (fallbackError) {
+            console.error('Fallback advance also failed:', fallbackError);
+        }
+    } finally {
+        setTimeout(() => {
+            this.isAutoAdvancing = false;
+        }, 2000);
+    }
+}
     /**
      * Snap playback to the expected track index
      */
@@ -495,69 +530,100 @@ export class SpotifyPlayback {
     }
 
     /**
-     * Setup game session with playlist and tracks using Web SDK
-     */
-    async setupGameSession() {
-        try {
-            // Import config and helper functions
-            const { getFinalTrackList, generatePlaylistNames } = await import('./config.js');
-            
-            // Get final track list (2 locked + 1 random)
-            const trackIds = getFinalTrackList();
-            console.log('Setting up Web SDK game session with tracks:', trackIds);
-            
-            // Get track details
-            const tracksResponse = await this.client.getTracks(trackIds);
-            const tracks = tracksResponse.tracks || [];
-            
-            if (tracks.length !== 3) {
-                throw new Error(`Expected 3 tracks, got ${tracks.length}`);
-            }
-            
-            // Get user profile for playlist creation
-            const userProfile = await this.client.getCurrentUser();
-            
-            // Generate playlist name
-            const playlistNames = generatePlaylistNames();
-            
-            // Create private playlist
-            const playlistData = {
-                name: playlistNames.private,
-                description: 'RHYTHM Game Session',
-                public: false,
-                collaborative: false
-            };
-            
-            const playlist = await this.client.createPlaylist(userProfile.id, playlistData);
-            
-            // Add tracks to playlist
-            const trackUris = tracks.map(track => track.uri);
-            await this.client.addTracksToPlaylist(playlist.id, trackUris);
-            
-            // Start playback from the playlist on Web SDK
-            await this.startPlayback(playlist.uri, 0);
-            
-            // Lock controls for the session
-            this.lockControls(playlist.uri, trackIds);
-            
-            console.log('Web SDK game session setup complete:', {
-                playlistId: playlist.id,
-                trackCount: tracks.length,
-                deviceId: this.deviceId
-            });
-            
-            return {
-                playlistId: playlist.id,
-                playlistUri: playlist.uri,
-                tracks: tracks,
-                sessionId: Math.random().toString(36).substring(2, 15)
-            };
-            
-        } catch (error) {
-            console.error('Failed to setup Web SDK game session:', error);
-            throw new Error(`Web SDK game session setup failed: ${error.message}`);
+ * Setup game session with playlist and tracks using Web SDK + transfer to user device
+ */
+async setupGameSession() {
+    try {
+        // Import config and helper functions
+        const { getFinalTrackList, generatePlaylistNames } = await import('./config.js');
+        
+        // Get final track list (2 locked + 1 random)
+        const trackIds = getFinalTrackList();
+        console.log('Setting up hybrid game session with tracks:', trackIds);
+        
+        // Get track details
+        const tracksResponse = await this.client.getTracks(trackIds);
+        const tracks = tracksResponse.tracks || [];
+        
+        if (tracks.length !== 3) {
+            throw new Error(`Expected 3 tracks, got ${tracks.length}`);
         }
+        
+        // Get user profile for playlist creation
+        const userProfile = await this.client.getCurrentUser();
+        
+        // Generate playlist name
+        const playlistNames = generatePlaylistNames();
+        
+        // Create private playlist
+        const playlistData = {
+            name: playlistNames.private,
+            description: '',
+            public: false,
+            collaborative: false
+        };
+        
+        const playlist = await this.client.createPlaylist(userProfile.id, playlistData);
+        
+        // Add tracks to playlist
+        const trackUris = tracks.map(track => track.uri);
+        await this.client.addTracksToPlaylist(playlist.id, trackUris);
+        
+        // Start playback on Web SDK first (to establish control)
+        await this.startPlayback(playlist.uri, 0);
+        
+        // Wait a moment for Web SDK to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Find user's active device and transfer playback
+        const devices = await this.client.getDevices();
+        const userDevice = devices.devices.find(d => 
+            d.is_active && d.id !== this.deviceId && d.type !== 'Computer'
+        );
+        
+        if (userDevice) {
+            console.log(`Transferring playback to user device: ${userDevice.name}`);
+            
+            // Transfer playback to user's device
+            await this.client.startPlayback({
+                context_uri: playlist.uri,
+                offset: { position: 0 }
+            }, userDevice.id);
+            
+            // Update our tracking to the user's device
+            this.activePlaybackDevice = userDevice.id;
+            this.isHybridMode = true;
+            
+            console.log(`Hybrid mode: Web SDK controls, ${userDevice.name} plays audio`);
+        } else {
+            console.log('No user device found, using Web SDK for both control and playback');
+            this.activePlaybackDevice = this.deviceId;
+            this.isHybridMode = false;
+        }
+        
+        // Lock controls for the session
+        this.lockControls(playlist.uri, trackIds);
+        
+        console.log('Hybrid game session setup complete:', {
+            playlistId: playlist.id,
+            trackCount: tracks.length,
+            webSdkDevice: this.deviceId,
+            playbackDevice: this.activePlaybackDevice,
+            hybridMode: this.isHybridMode
+        });
+        
+        return {
+            playlistId: playlist.id,
+            playlistUri: playlist.uri,
+            tracks: tracks,
+            sessionId: Math.random().toString(36).substring(2, 15)
+        };
+        
+    } catch (error) {
+        console.error('Failed to setup hybrid game session:', error);
+        throw new Error(`Hybrid game session setup failed: ${error.message}`);
     }
+}
 
     async disconnect() {
         if (this.player) {
