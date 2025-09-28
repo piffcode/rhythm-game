@@ -157,23 +157,31 @@ export class NativeSpotifyPlayback {
             this.isPlaying = state.is_playing;
             this.positionMs = state.progress_ms || 0;
             this.lastUpdateTime = Date.now();
-            
+            this.smoothedPosition = this.positionMs;
+
             // Update active device if it changed
             if (state.device.id !== this.activeDeviceId) {
                 console.log(`Device changed from ${this.activeDeviceId} to ${state.device.id}`);
                 this.activeDeviceId = state.device.id;
             }
-            
+
             // Check for track changes
             if (state.item && (!this.currentTrack || this.currentTrack.id !== state.item.id)) {
                 this.currentTrack = state.item;
                 console.log(`Track changed to: ${state.item.name}`);
-                
+
                 if (this.onTrackChange) {
                     this.onTrackChange(state.item);
                 }
             }
-            
+
+            if (this.sessionTracks.length > 0 && state.item) {
+                const activeIndex = this.sessionTracks.findIndex(trackId => trackId === state.item.id);
+                if (activeIndex >= 0) {
+                    this.expectedTrackIndex = activeIndex;
+                }
+            }
+
             // Handle controls lock enforcement
             if (this.controlsLocked) {
                 this.enforceControlLocks(state);
@@ -407,6 +415,13 @@ export class NativeSpotifyPlayback {
      */
     getPositionMs() {
         return this.smoothedPosition + this.calibrationOffset;
+    }
+
+    /**
+     * Get the current track object if available
+     */
+    getCurrentTrack() {
+        return this.currentTrack;
     }
 
     /**
