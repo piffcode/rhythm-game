@@ -35,7 +35,6 @@ export class SpotifyPlayback {
     this.activePlaybackDevice = null;  // Track which device is actually playing audio
     this.isHybridMode = false;         // Track if we're in hybrid mode
 }
-    }
 
     /**
      * Initialize the Spotify Web Playback SDK
