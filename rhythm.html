@@ -589,7 +589,8 @@
             timingClock: null,
             debugger: null,
             spotifyDetectionInterval: null,
-            pageLoadTime: Date.now()
+            pageLoadTime: Date.now(),
+            playbackBindingsConfigured: false
         };
 
         app.debugger = new GameDebugger({
@@ -818,6 +819,108 @@
                 return true;
             }
             return false;
+        }
+
+        // Bind native Spotify playback events to the game engine
+        function bindPlaybackToEngine() {
+            if (!app.playback || !app.engine || !app.client) {
+                return;
+            }
+
+            if (app.playbackBindingsConfigured) {
+                return;
+            }
+            app.playbackBindingsConfigured = true;
+
+            const handleTrackChange = async (track) => {
+                if (!track || !track.id) {
+                    app.debugger?.log('playback:trackChangeIgnored', { reason: 'invalidTrack' });
+                    return;
+                }
+
+                try {
+                    const trackIndex = Array.isArray(app.engine.tracks)
+                        ? app.engine.tracks.findIndex(sessionTrack => sessionTrack?.id === track.id)
+                        : -1;
+
+                    if (trackIndex >= 0) {
+                        app.engine.currentTrackIndex = trackIndex;
+                    }
+
+                    app.debugger?.log('playback:trackChange', {
+                        trackId: track.id,
+                        trackName: track.name,
+                        trackIndex
+                    });
+
+                    let audioAnalysis = null;
+                    if (!app.engine.midiGenerator.hasMidiData(track.id)) {
+                        try {
+                            audioAnalysis = await app.client.getAudioAnalysis(track.id);
+                            app.debugger?.log('playback:analysisLoaded', {
+                                trackId: track.id
+                            });
+                        } catch (analysisError) {
+                            console.warn('Audio analysis unavailable, using procedural chart:', analysisError);
+                            app.debugger?.log('playback:analysisError', {
+                                trackId: track.id,
+                                message: analysisError.message
+                            });
+                        }
+                    }
+
+                    await app.engine.startTrack(track, audioAnalysis);
+                    app.debugger?.setExtraMetrics({
+                        'Now Playing': `${track.name} – ${track.artists?.[0]?.name || 'Unknown Artist'}`
+                    });
+                } catch (error) {
+                    console.error('Failed to start track from native playback:', error);
+                    app.debugger?.log('playback:startTrackError', {
+                        message: error.message
+                    });
+                }
+            };
+
+            app.playback.onTrackChange = handleTrackChange;
+
+            app.playback.onStateChange = (state) => {
+                if (!state) {
+                    return;
+                }
+
+                if (!state.is_playing && app.engine?.isPlaying) {
+                    app.engine.pause?.();
+                } else if (state.is_playing && app.engine?.isPaused) {
+                    app.engine.resume?.();
+                }
+
+                app.debugger?.setExtraMetrics({
+                    'Playback State': state.is_playing ? 'Playing' : 'Paused'
+                });
+            };
+
+            const hydrateInitialTrack = async () => {
+                try {
+                    const initialTrack = typeof app.playback.getCurrentTrack === 'function'
+                        ? app.playback.getCurrentTrack()
+                        : app.playback.currentTrack;
+
+                    if (initialTrack) {
+                        await handleTrackChange(initialTrack);
+                        return;
+                    }
+
+                    const playbackState = await app.client.getPlaybackState();
+                    if (playbackState?.item) {
+                        await handleTrackChange(playbackState.item);
+                    }
+                } catch (error) {
+                    console.warn('Unable to hydrate initial native playback state:', error);
+                    app.debugger?.log('playback:initialStateError', { message: error.message });
+                }
+            };
+
+            hydrateInitialTrack();
         }
 
         // Show save prompt after track ends
@@ -1199,6 +1302,7 @@
                         app.ui.showResults(sessionResult);
                     }
                     app.isInitialized = false;
+                    app.playbackBindingsConfigured = false;
                     if (app.gameLoopId) {
                         cancelAnimationFrame(app.gameLoopId);
                         app.gameLoopId = null;
@@ -1398,6 +1502,8 @@
                     playback: app.playback,
                     timingClock: app.timingClock
                 });
+
+                bindPlaybackToEngine();
 
                 console.log('Waiting for MIDI files to load...');
                 await new Promise(resolve => {
