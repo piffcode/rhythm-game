@@ -33,7 +33,6 @@ export const config = {
     // Pool of tracks for random third selection - FIXED: Added missing commas
     THIRD_TRACK_POOL: [
         '2FDTHlrBguDzQkp7PVj16Q',
-        '02BNcawEW0KlzLW9DeHzXZJ',  // Added missing comma
         '3O8NlPh2LByMU9lSRSHedm',   // Added missing comma
         '3NxAG2ni1lLa8RKL6a0INc'
     ],
