@@ -487,6 +487,78 @@ export class SpotifyPlayback {
     /**
      * Cleanup player resources
      */
+    /**
+     * Advance to next track - alias method for compatibility
+     */
+    async advanceTrack() {
+        return await this.advanceToNextTrack();
+    }
+
+    /**
+     * Setup game session with playlist and tracks using Web SDK
+     */
+    async setupGameSession() {
+        try {
+            // Import config and helper functions
+            const { getFinalTrackList, generatePlaylistNames } = await import('./config.js');
+            
+            // Get final track list (2 locked + 1 random)
+            const trackIds = getFinalTrackList();
+            console.log('Setting up Web SDK game session with tracks:', trackIds);
+            
+            // Get track details
+            const tracksResponse = await this.client.getTracks(trackIds);
+            const tracks = tracksResponse.tracks || [];
+            
+            if (tracks.length !== 3) {
+                throw new Error(`Expected 3 tracks, got ${tracks.length}`);
+            }
+            
+            // Get user profile for playlist creation
+            const userProfile = await this.client.getCurrentUser();
+            
+            // Generate playlist name
+            const playlistNames = generatePlaylistNames();
+            
+            // Create private playlist
+            const playlistData = {
+                name: playlistNames.private,
+                description: 'RHYTHM Game Session',
+                public: false,
+                collaborative: false
+            };
+            
+            const playlist = await this.client.createPlaylist(userProfile.id, playlistData);
+            
+            // Add tracks to playlist
+            const trackUris = tracks.map(track => track.uri);
+            await this.client.addTracksToPlaylist(playlist.id, trackUris);
+            
+            // Start playback from the playlist on Web SDK
+            await this.startPlayback(playlist.uri, 0);
+            
+            // Lock controls for the session
+            this.lockControls(playlist.uri, trackIds);
+            
+            console.log('Web SDK game session setup complete:', {
+                playlistId: playlist.id,
+                trackCount: tracks.length,
+                deviceId: this.deviceId
+            });
+            
+            return {
+                playlistId: playlist.id,
+                playlistUri: playlist.uri,
+                tracks: tracks,
+                sessionId: Math.random().toString(36).substring(2, 15)
+            };
+            
+        } catch (error) {
+            console.error('Failed to setup Web SDK game session:', error);
+            throw new Error(`Web SDK game session setup failed: ${error.message}`);
+        }
+    }
+
     async disconnect() {
         if (this.player) {
             await this.player.disconnect();
