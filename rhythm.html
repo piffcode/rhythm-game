@@ -568,7 +568,7 @@
     <script type="module">
         import { config, generateCompletionCode } from './config.js';
         import { SpotifyClient } from './spotify-client.js';
-        import { SpotifyPlayback as NativeSpotifyPlayback } from './spotify-playback.js';
+        import { NativeSpotifyPlayback } from './native-spotify-playback.js';
         import { GameEngine } from './game-engine.js';
         import { GameInput } from './game-input.js';
         import { GameRender } from './game-render.js';
@@ -610,11 +610,11 @@
 
         // Natural listening behavior state
         let naturalListening = {
-            skipThreshold: 0,
+            skipThreshold: Infinity,
             shouldShowSavePrompt: false,
             savePromptShown: false,
             savePromptDelay: 0,
-            currentTrackIndex: 0,
+            currentTrackIndex: -1,
             trackStartTime: 0
         };
 
@@ -766,7 +766,11 @@
             const maxPercent = config.NATURAL_LISTENING.SKIP_THRESHOLD_MAX;
             const skipPercent = minPercent + Math.random() * (maxPercent - minPercent);
 
-            naturalListening.skipThreshold = (skipPercent / 100) * trackDuration;
+            if (!Number.isFinite(trackDuration) || trackDuration <= 0) {
+                naturalListening.skipThreshold = Infinity;
+            } else {
+                naturalListening.skipThreshold = (skipPercent / 100) * trackDuration;
+            }
             naturalListening.currentTrackIndex = trackIndex;
             naturalListening.trackStartTime = Date.now();
             naturalListening.savePromptShown = false;
@@ -796,7 +800,12 @@
 
         // Check if we should skip to next track
         function checkNaturalSkip(currentPosition) {
-            if (currentPosition >= naturalListening.skipThreshold) {
+            // Only trigger when the threshold has been configured for the active track
+            if (app.engine &&
+                naturalListening.currentTrackIndex === app.engine.currentTrackIndex &&
+                Number.isFinite(naturalListening.skipThreshold) &&
+                naturalListening.skipThreshold > 0 &&
+                currentPosition >= naturalListening.skipThreshold) {
                 app.debugger?.log('natural:skipTrigger', {
                     position: Math.round(currentPosition),
                     threshold: Math.round(naturalListening.skipThreshold)
