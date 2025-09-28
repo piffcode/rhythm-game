@@ -40,6 +40,8 @@ export class GameRender {
         this.hitEffects = [];
         this.comboPopups = [];
         this.visibleNotes = [];
+        this.lanePressStates = [];
+        this.lanePressFade = 0.004; // Intensity reduction per ms
         
         // Cached elements
         this.cachedGradients = new Map();
@@ -53,7 +55,7 @@ export class GameRender {
         
         // Animation state
         this.animationTime = 0;
-        this.lastAnimationFrameTime = 0;
+        this.lastAnimationFrameTime = Date.now();
         
         // Performance tracking
         this.frameTime = 0;
@@ -66,6 +68,7 @@ export class GameRender {
         // Initialize rendering
         this.setupCanvas();
         this.precomputeVisualElements();
+        this.initializeLanePressStates(this.lanes);
         
         console.log(`GameRender initialized for ${this.performanceLevel} performance`);
     }
@@ -223,6 +226,10 @@ export class GameRender {
         };
     }
 
+    initializeLanePressStates(laneCount) {
+        this.lanePressStates = Array.from({ length: laneCount }, () => ({ intensity: 0 }));
+    }
+
     /**
      * Frame rate management
      */
@@ -245,12 +252,13 @@ export class GameRender {
         
         const screenMargin = 100;
         const approachTime = gameState.approachTime || 1500;
-        
+
         this.visibleNotes = gameState.activeNotes.filter(note => {
             const timeDiff = note.time - gameState.gameTime;
-            const progress = 1 - (timeDiff / approachTime);
+            const fallbackProgress = 1 - (timeDiff / approachTime);
+            const progress = Math.max(-0.3, Math.min(1.3, note.renderProgress ?? fallbackProgress));
             const y = progress * this.highwayHeight;
-            
+
             return y >= -screenMargin && y <= this.height + screenMargin;
         });
     }
@@ -261,6 +269,7 @@ export class GameRender {
     setLanes(laneCount) {
         this.lanes = laneCount;
         this.updateCanvasSize();
+        this.initializeLanePressStates(laneCount);
     }
 
     /**
@@ -303,7 +312,7 @@ export class GameRender {
         // Render game elements
         this.renderHighway();
         this.renderLanes();
-        this.renderReceptors(gameState);
+        this.renderReceptors(gameState, deltaTime);
         this.renderNotesOptimized(gameState);
         
         // Skip expensive effects on low-end devices
@@ -389,37 +398,55 @@ export class GameRender {
     /**
      * Optimized receptor rendering
      */
-    renderReceptors(gameState) {
+    renderReceptors(gameState, deltaTime) {
         const receptorPath = this.cachedPaths.get('receptor');
         const glowIntensity = this.enableGlow ? Math.sin(this.animationTime * 0.005) * 0.3 + 0.7 : 1;
-        
+        const receptorRadius = (config.VISUALS.RECEPTOR_SIZE || 30) * (this.isMobile ? 0.8 : 1);
+        const validDelta = Number.isFinite(deltaTime) ? Math.max(0, deltaTime) : 16;
+
         for (let i = 0; i < this.lanes; i++) {
             const centerX = (i + 0.5) * this.laneWidth;
             const centerY = this.receptorY;
             const laneColor = this.colors.lanes[i] || '#ffffff';
-            
+            const laneState = this.lanePressStates[i];
+
+            if (laneState) {
+                laneState.intensity = Math.max(0, laneState.intensity - validDelta * this.lanePressFade);
+            }
+
+            const pressIntensity = laneState?.intensity || 0;
+
             this.ctx.save();
             this.ctx.translate(centerX, centerY);
-            
+
+            if (pressIntensity > 0.001) {
+                this.ctx.save();
+                this.ctx.globalAlpha = 0.2 + pressIntensity * 0.4;
+                this.ctx.fillStyle = laneColor;
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, receptorRadius * (1 + pressIntensity * 0.15), 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.restore();
+            }
+
             if (this.enableGlow) {
-                // Glow effect
-                this.ctx.globalAlpha = glowIntensity * 0.5;
-                this.ctx.shadowBlur = 15;
+                this.ctx.globalAlpha = Math.min(1, glowIntensity * (1 + pressIntensity * 0.3));
+                this.ctx.shadowBlur = 15 + pressIntensity * 10;
                 this.ctx.shadowColor = laneColor;
                 this.ctx.strokeStyle = laneColor;
-                this.ctx.lineWidth = 4;
+                this.ctx.lineWidth = 4 + pressIntensity * 2;
                 this.ctx.stroke(receptorPath);
                 this.ctx.shadowBlur = 0;
             } else {
-                // Simple receptor
+                this.ctx.globalAlpha = 0.7 + pressIntensity * 0.3;
                 this.ctx.strokeStyle = laneColor;
-                this.ctx.lineWidth = 3;
+                this.ctx.lineWidth = 3 + pressIntensity * 1.5;
                 this.ctx.stroke(receptorPath);
             }
-            
+
             this.ctx.restore();
         }
-        
+
         this.renderStats.drawCalls += this.lanes;
     }
 
@@ -459,11 +486,13 @@ export class GameRender {
             if (note.isHit) return;
             
             const timeDiff = note.time - gameTime;
-            const progress = 1 - (timeDiff / approachTime);
-            const y = progress * this.highwayHeight;
+            const fallbackProgress = 1 - (timeDiff / approachTime);
+            const progress = note.renderProgress ?? fallbackProgress;
+            const clampedProgress = Math.max(-0.2, Math.min(1.2, progress));
+            const y = clampedProgress * this.highwayHeight;
             const centerX = (note.lane + 0.5) * this.laneWidth;
             const laneColor = this.colors.lanes[note.lane] || '#ffffff';
-            
+
             this.ctx.save();
             this.ctx.translate(centerX, y);
             
@@ -473,7 +502,7 @@ export class GameRender {
                 this.ctx.fill(notePath);
             } else {
                 // Enhanced note with glow
-                const alpha = Math.max(0.3, Math.min(1, progress * 2));
+                const alpha = Math.max(0.3, Math.min(1, Math.max(0, clampedProgress) * 2));
                 
                 if (this.enableGlow) {
                     this.ctx.globalAlpha = alpha * 0.5;
@@ -506,9 +535,11 @@ export class GameRender {
             
             const startTimeDiff = note.time - gameTime;
             const endTimeDiff = note.endTime - gameTime;
-            const startProgress = 1 - (startTimeDiff / approachTime);
-            const endProgress = 1 - (endTimeDiff / approachTime);
-            
+            const fallbackStart = 1 - (startTimeDiff / approachTime);
+            const fallbackEnd = 1 - (endTimeDiff / approachTime);
+            const startProgress = Math.max(-0.2, Math.min(1.2, note.renderProgress ?? fallbackStart));
+            const endProgress = Math.max(-0.2, Math.min(1.2, note.renderEndProgress ?? fallbackEnd));
+
             const startY = startProgress * this.highwayHeight;
             const endY = endProgress * this.highwayHeight;
             const centerX = (note.lane + 0.5) * this.laneWidth;
@@ -654,15 +685,36 @@ export class GameRender {
         this.renderStats.effectsRendered += this.particleSystem.getParticleCount();
     }
 
+    triggerLanePress(lane, hitType) {
+        if (!this.lanePressStates || this.lanePressStates.length !== this.lanes) {
+            this.initializeLanePressStates(this.lanes);
+        }
+
+        const laneState = this.lanePressStates[lane];
+        if (!laneState) return;
+
+        const baseIntensity = hitType === 'MISS' ? 0.35 : 0.85;
+        laneState.intensity = Math.min(1, Math.max(laneState.intensity, baseIntensity));
+    }
+
+    showHitEffect(lane, hitType, hitInfo = {}) {
+        this.triggerLanePress(lane, hitType);
+        this.addHitEffect(lane, hitType, hitInfo.score);
+
+        if (hitInfo.combo) {
+            this.addComboPopup(hitInfo.combo, hitInfo.score);
+        }
+    }
+
     /**
      * Add hit effect with mobile considerations
      */
     addHitEffect(lane, hitType, score) {
         const color = this.colors.hitEffects[hitType] || '#ffffff';
-        const text = hitType === 'PERFECT' ? 'PERFECT!' : 
+        const text = hitType === 'PERFECT' ? 'PERFECT!' :
                      hitType === 'GREAT' ? 'GREAT!' :
                      hitType === 'GOOD' ? 'GOOD' : 'MISS';
-        
+
         this.hitEffects.push({
             lane: lane,
             color: color,
