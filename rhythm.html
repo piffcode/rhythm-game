@@ -1269,9 +1269,12 @@
         function setupEventHandlers() {
             if (app.input && app.engine) {
                 app.input.onLaneHit = (lane, inputTime) => {
-                    const result = app.engine.handleLaneHit(lane, inputTime);
+                    const timingAdjustedInput = Number.isFinite(inputTime)
+                        ? app.engine.getCurrentGameTime()
+                        : undefined;
+                    const result = app.engine.handleLaneHit(lane, timingAdjustedInput);
                     if (result && app.render) {
-                        app.render.showHitEffect(lane, result.hitType);
+                        app.render.showHitEffect(lane, result.hitType, result);
                     }
                 };
 
