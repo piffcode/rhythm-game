@@ -10,13 +10,20 @@ export class MidiChartGenerator {
         // Mapping between Spotify track IDs and pre-generated chart files
         this.jsonChartMap = {
             '5FMyXeZ0reYloRTiCkPprT': 'charts/track1.json',
-            '0YWmeJtd7Fp1tH3978qUIH': 'charts/track2.json'
+            '0YWmeJtd7Fp1tH3978qUIH': 'charts/track2.json',
+            '2FDTHlrBguDzQkp7PVj16Q': 'charts/track3.json',  // Random track 1
+            '3O8NlPh2LByMU9lSRSHedm': 'charts/track4.json',  // Random track 2
+            '3NxAG2ni1lLa8RKL6a0INc': 'charts/track5.json'   // Random track 3
         };
 
         // Maintain MIDI map for backwards compatibility / fallback support
         this.midiTrackMap = {
             '5FMyXeZ0reYloRTiCkPprT': 'track1.mid',
-            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid'
+            '0YWmeJtd7Fp1tH3978qUIH': 'track2.mid',
+            '2FDTHlrBguDzQkp7PVj16Q': 'track3.mid',  // Random track 1
+            '3O8NlPh2LByMU9lSRSHedm': 'track4.mid',  // Random track 2
+            '3NxAG2ni1lLa8RKL6a0INc': 'track5.mid'   // Random track 3
+        };
         };
 
         // Begin loading available chart resources
