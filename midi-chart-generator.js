@@ -24,7 +24,6 @@ export class MidiChartGenerator {
             '3O8NlPh2LByMU9lSRSHedm': 'track4.mid',  // Random track 2
             '3NxAG2ni1lLa8RKL6a0INc': 'track5.mid'   // Random track 3
         };
-        };
 
         // Begin loading available chart resources
         this.loadJsonCharts();
