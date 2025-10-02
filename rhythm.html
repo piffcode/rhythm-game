@@ -504,28 +504,24 @@
             </div>
         </div>
 
-        <!-- Auto-Detection Input Shield -->
-        <div class="input-shield" id="inputShield">
-            <div class="shield-content">
-                <div class="loading-step" id="loadingStep">
-                    <!-- Step 1: Spotify Auto-Detection -->
+       <!-- Step 1: Music App Setup -->
                     <div class="step-content" id="spotifySetup">
                         <div class="step-icon">🎵</div>
-                        <h2 class="step-title" id="spotifyTitle">Checking for Spotify...</h2>
-                        <div class="auto-start-indicator" id="autoStartIndicator">
-                            <div class="pulse-dot"></div>
-                            <span id="detectionStatus">Looking for active Spotify session...</span>
-                        </div>
-                        <div class="step-description" id="spotifyInstructions" style="display: none;">
-                            To play this rhythm game, please:
+                        <h2 class="step-title" id="spotifyTitle">Play a Song to Begin</h2>
+                        <div class="step-description" id="spotifyInstructions">
+                            To start the rhythm game:
                             <ol class="step-instructions">
-                                <li>Open your Spotify app (phone, computer, or web)</li>
-                                <li>Start playing any song to activate your device</li>
+                                <li>Open your music app (phone, computer, or web)</li>
+                                <li><strong>Play any song</strong> to activate playback</li>
                                 <li>Return to this page - the game will start automatically</li>
                             </ol>
                         </div>
+                        <div class="auto-start-indicator" id="autoStartIndicator">
+                            <div class="pulse-dot"></div>
+                            <span id="detectionStatus">Waiting for music playback...</span>
+                        </div>
                         <div class="step-note">
-                            The game will start automatically when an active Spotify session is detected
+                            The game will start automatically once music is playing
                         </div>
                     </div>
                     
