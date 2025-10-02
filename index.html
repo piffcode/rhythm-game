@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>RHYTHM - Spotify Rhythm Game</title>
+    <title>RHYTHM - Music Rhythm Game</title>
     <style>
         * {
             margin: 0;
@@ -98,7 +98,7 @@
             box-shadow: none;
         }
         
-        .spotify-icon {
+        .play-icon {
             width: 20px;
             height: 20px;
             fill: currentColor;
@@ -194,9 +194,9 @@
 <body>
     <div class="container">
         <div class="logo">RHYTHM</div>
-        <div class="subtitle">Spotify Rhythm Game</div>
+        <div class="subtitle">Music Rhythm Game</div>
         <div class="description">
-            Test your rhythm with your Spotify music library. Hit the notes, build combos, and achieve perfect scores!
+            Test your rhythm and timing. Hit the notes, build combos, and achieve perfect scores!
         </div>
         
         <div class="country-selector">
@@ -227,15 +227,15 @@
         </div>
         
         <button class="btn" id="startBtn" onclick="startAuth()">
-            <svg class="spotify-icon" viewBox="0 0 24 24">
-                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.3c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.32 11.28-1.08 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+            <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
             </svg>
-            Connect with Spotify
+            Start Game
         </button>
         
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <div style="margin-top: 10px;">Connecting to Spotify...</div>
+            <div style="margin-top: 10px;">Connecting...</div>
         </div>
         
         <div class="error" id="error">
@@ -271,9 +271,8 @@
         
         <div class="requirements">
             <strong>Requirements:</strong><br>
-            • Spotify Premium account<br>
-            • Spotify app running on your device<br>
-            • Internet connection
+           Requires Spotify Premium to play<br>
+            <br>
         </div>
     </div>
 
@@ -310,7 +309,7 @@
             try {
                 // Validate configuration
                 if (!config.CLIENT_ID || config.CLIENT_ID === 'your_spotify_client_id_here') {
-                    throw new Error('Spotify Client ID not configured. Please check config.js');
+                    throw new Error('Client ID not configured. Please check config.js');
                 }
                 
                 // Show loading state
